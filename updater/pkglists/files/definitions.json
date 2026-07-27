@@ -248,6 +248,19 @@ ifdef(`GO',`
 		"description": "Service to increase anonymity on the Internet.",
 		"labels": ["advanced", "community"]
 	},
+	"thread": {
+		"title": "Thread and Matter smart home",
+		"description": "Turns the router into a Thread border router, so Thread smart home devices can be reached from the network without a separate hub. Needs an 802.15.4 radio, usually a USB dongle.",
+		"url": "https://openthread.io/guides/border-router",
+		"options": {
+			"matter": {
+				"title": "Matter management",
+				"description": "Lets a Matter controller, such as Home Assistant, read and change the Thread network credentials of this router over an authenticated connection, and share the Wi-Fi credentials for onboarding Wi-Fi devices.",
+				"default": true
+			}
+		},
+		"labels": ["experimental"]
+	},
 	"drivers": {
 		"title": "Alternative core drivers",
 		"description": "These options allow you to use alternative drivers over those available in default installation. You can try to enable these if you encounter some problems with default ones.",
