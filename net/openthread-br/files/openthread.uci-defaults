@@ -1,0 +1,70 @@
+#!/bin/sh
+#
+# Firewall placement for the Thread interface.
+#
+# otbr-agent owns the Thread ingress filter in its own nftables table, built
+# from what the mesh currently advertises. What it cannot decide is the static
+# policy: which zones may talk to Thread at all, and what may reach the router
+# itself. That belongs here.
+#
+# The two are evaluated independently and a drop in either wins, so this zone
+# only has to permit the traffic; otbr-agent still restricts what enters the
+# mesh.
+
+FW=firewall
+
+# Idempotent: leave an existing configuration alone so a reinstall or a manual
+# change is not overwritten.
+[ -n "$(uci -q get firewall.thread)" ] && exit 0
+
+uci -q batch <<-EOF
+	set firewall.thread=zone
+	set firewall.thread.name='thread'
+	set firewall.thread.network='thread'
+	set firewall.thread.input='REJECT'
+	set firewall.thread.output='ACCEPT'
+	set firewall.thread.forward='REJECT'
+	set firewall.thread.family='ipv6'
+
+	set firewall.lan_thread=forwarding
+	set firewall.lan_thread.src='lan'
+	set firewall.lan_thread.dest='thread'
+
+	set firewall.thread_lan=forwarding
+	set firewall.thread_lan.src='thread'
+	set firewall.thread_lan.dest='lan'
+
+	set firewall.thread_wan=forwarding
+	set firewall.thread_wan.src='thread'
+	set firewall.thread_wan.dest='wan'
+
+	set firewall.thread_icmp=rule
+	set firewall.thread_icmp.name='Allow-ICMPv6-Thread'
+	set firewall.thread_icmp.src='thread'
+	set firewall.thread_icmp.proto='icmp'
+	set firewall.thread_icmp.family='ipv6'
+	set firewall.thread_icmp.target='ACCEPT'
+
+	set firewall.thread_dhcpv6=rule
+	set firewall.thread_dhcpv6.name='Allow-DHCPv6-Thread'
+	set firewall.thread_dhcpv6.src='thread'
+	set firewall.thread_dhcpv6.proto='udp'
+	set firewall.thread_dhcpv6.dest_port='547'
+	set firewall.thread_dhcpv6.family='ipv6'
+	set firewall.thread_dhcpv6.target='ACCEPT'
+
+	set firewall.thread_mdns=rule
+	set firewall.thread_mdns.name='Allow-mDNS-Thread-BR'
+	set firewall.thread_mdns.src='lan'
+	set firewall.thread_mdns.proto='udp'
+	set firewall.thread_mdns.dest_port='5353'
+	set firewall.thread_mdns.target='ACCEPT'
+
+	set firewall.openthread_include=include
+	set firewall.openthread_include.type='script'
+	set firewall.openthread_include.path='/usr/libexec/openthread/firewall.sh'
+EOF
+
+uci -q commit "$FW"
+
+exit 0

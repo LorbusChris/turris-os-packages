@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=openthread-br
 PKG_VERSION:=2026.08.0
 PKG_SOURCE_VERSION:=v$(PKG_VERSION)
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=https://github.com/openthread/ot-br-posix.git
@@ -15,6 +15,8 @@ PKG_MIRROR_HASH:=4645fefcf89d0c06de87bbfa9e52e2a522de48fa52146427669323c894405eb
 PKG_MAINTAINER:=Stijn Tintel <stijn@linux-ipv6.be>
 PKG_LICENSE:=BSD-3-Clause
 PKG_LICENSE_FILES:=LICENSE
+
+PKG_BUILD_DEPENDS:=libnftnl libmnl
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
@@ -35,6 +37,9 @@ define Package/openthread-br
 	+kmod-tun \
 	+kmod-usb-acm \
 	+jsonfilter \
+	+libmnl \
+	+libnftnl \
+	+kmod-nft-core \
 	+libblobmsg-json \
 	+libjson-c \
 	+libncurses \
@@ -57,7 +62,7 @@ CMAKE_OPTIONS += \
 	-DOT_BORDER_ROUTER=ON \
 	-DOT_CHANNEL_MANAGER=ON \
 	-DOT_CHANNEL_MONITOR=ON \
-	-DOT_FIREWALL=OFF \
+	-DOTBR_NFTABLES=ON \
 	-DOT_NAT64_BORDER_ROUTING=OFF \
 	-DOT_TARGET_OPENWRT=ON \
 	-DOTBR_BACKBONE_ROUTER=ON \
@@ -91,9 +96,13 @@ endef
 
 define Package/openthread-br/install
 	$(INSTALL_DIR) \
+		$(1)/etc/uci-defaults \
 		$(1)/lib/netifd/proto \
+		$(1)/usr/libexec/openthread \
 		$(1)/usr/sbin
 	$(INSTALL_BIN) ./files/openthread-proto.sh $(1)/lib/netifd/proto/openthread.sh
+	$(INSTALL_BIN) ./files/openthread.uci-defaults $(1)/etc/uci-defaults/99-openthread-firewall
+	$(INSTALL_BIN) ./files/openthread-firewall.sh $(1)/usr/libexec/openthread/firewall.sh
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/* $(1)/usr/sbin
 endef
 

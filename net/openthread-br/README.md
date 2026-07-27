@@ -41,13 +41,60 @@ package was built from.
 
 ### Firewall support
 
-OpenWrt uses firewall4 with nftables by default, but the OpenThread firewall
-implementation uses IPTables and IPset. While we still support firewall3 with
-IPTables, it's not a good idea to add new dependencies to old things.
-Therefore, firewall support is disabled completely.
+The upstream Thread ingress filter is a shell script driving `ip6tables` and
+`ipset`, which is a poor fit for a firewall4 system. This package instead
+carries the in-process nftables backend proposed in
+[ot-br-posix#3325](https://github.com/openthread/ot-br-posix/pull/3325), which
+is the feature asked for in
+[ot-br-posix#1675](https://github.com/openthread/ot-br-posix/issues/1675), and
+builds with `OTBR_NFTABLES=ON`. otbr-agent then talks to nftables over netlink
+and needs no iptables or ipset at all. Setting `OTBR_NFTABLES` also forces
+`OT_FIREWALL` off, so the OpenThread core ipset producer does not run
+alongside it.
 
-This can be revised once the following feature request is implemented:
-https://github.com/openthread/ot-br-posix/issues/1675
+The filtering is split across two nftables tables, and it has to be:
+
+`inet otbr` is created and maintained by otbr-agent. It holds the ingress
+filter, whose two prefix sets are rebuilt from Thread network data every time
+the mesh changes, covering the on-mesh prefixes and the mesh-local /64. That
+cannot be expressed in firewall4, which renders a static ruleset from UCI and
+has no view of Thread network data. Nor can otbr-agent put the sets in the fw4
+table, because firewall4 flushes and regenerates `inet fw4` on every reload.
+
+`inet fw4` keeps the static policy: which zones may reach Thread, and what may
+reach the router itself. This package adds a `thread` zone for that on first
+install, permitting `lan` and `wan` forwarding both ways, ICMPv6 and DHCPv6
+from Thread, and mDNS from `lan`. Adjust it as you would any other zone; it is
+not rewritten on upgrade.
+
+Both tables are evaluated and a drop in either wins, so the zone only has to
+permit traffic. otbr-agent still decides what is allowed into the mesh.
+
+Note that the ingress filter is scoped to forwarded traffic. It never sees
+packets addressed to the router itself, so services that otbr-agent listens on
+are firewall4's responsibility alone. That is independent of this package's
+decision to leave the REST API off.
+
+`fw4 flush` deletes every table in the ruleset, not just its own, and that is
+what `/etc/init.d/firewall stop` runs. On a Turris router that takes out
+`inet turris-sentinel`, `ip bcp38` and the `mangle` tables along with
+`inet otbr`.
+
+Packages that own a table handle this by registering a firewall4 include, which
+fw4 runs on every start and reload; `bcp38` and `sentinel-firewall` both do, and
+both come back on the next `/etc/init.d/firewall start`. Theirs simply rebuild
+unconditionally, because their rules come from UCI and a shell script can
+regenerate them. Ours cannot: the ingress sets are built by otbr-agent from live
+Thread network data, so the include instead notices the table has gone and
+brings the Thread interface back up, letting otbr-agent rebuild it.
+
+Not every table recovers, though. `ip mangle` and `ip6 mangle` are the
+compatibility tables that `iptables-nft` creates on demand, they have no owner
+registered with fw4, and a stop/start cycle leaves them missing until whatever
+added those rules runs again. That is not something this package introduces or
+can fix, but it is worth knowing when reading `nft list tables` after a firewall
+restart: a missing `mangle` is a pre-existing consequence of `fw4 flush`, not a
+symptom of the Thread border router.
 
 ### mDNS
 
