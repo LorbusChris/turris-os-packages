@@ -1,0 +1,194 @@
+# Copyright (c) 2023-2026 Project CHIP Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=matter-netman
+PKG_RELEASE:=1
+PKG_SOURCE_URL:=https://github.com/project-chip/connectedhomeip.git
+PKG_SOURCE_PROTO:=git
+PKG_SOURCE_SUBMODULES:=\
+  third_party/pigweed/repo \
+  third_party/jsoncpp/repo \
+  third_party/nlassert/repo \
+  third_party/nlio/repo
+
+# Hash can be regenerated with make package/matter-netman/check FIXUP=1
+PKG_SOURCE_DATE:=2026-06-13
+PKG_SOURCE_VERSION:=b39eff6ed09e92344c3c6cc9a5a1b495a469bbfd
+PKG_MIRROR_HASH:=cc87d6df5cc945309bea4c810ba90081fa59dfaaa1daedf9fa199d17e3f313f8
+
+# Use local source dir for development
+# USE_SOURCE_DIR:=$(HOME)/workspace/connectedhomeip
+
+PKG_MAINTAINER:=Christian Glombek <c.glombek@cosa.systems>
+PKG_LICENSE:=Apache-2.0
+PKG_LICENSE_FILES:=LICENSE
+
+# Python 3.11 is required for code generation; use the python3 host package if necessary.
+# Because it is installed with a broken SSL configuration in some cases (including the
+# OpenWrt SDK docker images), we use the python3-host-ssl package to work around this.
+HAVE_PYTHON_311:=$(shell $(STAGING_DIR_HOST)/bin/$(PYTHON) -c 'import sys; print(sys.version_info>=(3,11) or "")')
+PKG_BUILD_DEPENDS:=gn/host $(if $(HAVE_PYTHON_311),,python3-host-ssl/host)
+PKG_BUILD_PARALLEL:=1
+
+include $(INCLUDE_DIR)/package.mk
+
+define Package/matter-netman/default
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=Matter Network Infrastructure Manager Daemon
+  URL:=https://github.com/project-chip/connectedhomeip
+  DEPENDS:=+libstdcpp +libatomic +libubus +libubox +jsonfilter
+  PROVIDES:=matter-netman
+  USERID:=matter:matter
+endef
+
+define Package/matter-netman/default/description
+  Matter Network Infrastructure Manager Daemon
+  Integrates a router / access point with the Matter IoT ecosystem.
+endef
+
+define Package/matter-netman-mbedtls
+  $(Package/matter-netman/default)
+  TITLE+= (mbedtls)
+  DEPENDS+= +PACKAGE_matter-netman-mbedtls:libmbedtls +@MBEDTLS_CCM_C
+  VARIANT:=mbedtls
+  DEFAULT_VARIANT:=1
+endef
+
+define Package/matter-netman-mbedtls/description
+$(Package/matter-netman/default/description)
+
+This variant of the package uses the mbedTLS crypto library. It turns on
+that library's MBEDTLS_CCM_C option, which OpenWrt leaves off by default
+and which the AES-CCM cipher of the Matter message layer requires.
+endef
+
+define Package/matter-netman-openssl
+  $(Package/matter-netman/default)
+  TITLE+= (openssl)
+  DEPENDS+= +PACKAGE_matter-netman-openssl:libopenssl
+  CONFLICTS:=matter-netman-mbedtls
+  VARIANT:=openssl
+endef
+
+define Package/matter-netman-openssl/description
+$(Package/matter-netman/default/description)
+
+This variant of the package uses the OpenSSL crypto library.
+endef
+
+# General options. The last two deliberately reverse what the example's
+# args.gni asks for: access restrictions are backed only by the SDK's
+# demonstration provider, which lifts every restriction on request, and
+# tracing is of no use in a shipped build.
+CONFIGURE_OPTIONS:=\
+	--enable-ubus \
+	--enable-detail-logging \
+	--enable-recommended=no \
+	--enable-access-restrictions=no \
+	--enable-network-layer-ble=no \
+	--enable-tracing-support=no
+
+# Logging backend
+CONFIGURE_OPTIONS+= --logging-backend=syslog
+TARGET_CFLAGS+= -DCHIP_SYSLOG_IDENT=\"matter\"
+
+# Crypto backend
+ifeq ($(BUILD_VARIANT),mbedtls)
+CONFIGURE_OPTIONS+= --crypto=mbedtls --enable-external-mbedtls
+TARGET_LDFLAGS+= -lmbedcrypto -lmbedx509
+endif
+ifeq ($(BUILD_VARIANT),openssl)
+CONFIGURE_OPTIONS+= --crypto=openssl
+endif
+
+# Configuration / persistence
+CONF_DIR:=/etc/matter
+TARGET_CFLAGS+=\
+	-DFATCONFDIR=\"$(CONF_DIR)\" \
+	-DSYSCONFDIR=\"$(CONF_DIR)/data\" \
+	-DLOCALSTATEDIR=\"$(CONF_DIR)/data\" \
+	-DCHIP_CONFIG_KVS_PATH=\"$(CONF_DIR)/data/chip_kvs.ini\"
+
+# Device Information. Runtime information is configured by bootstrap.sh
+include $(INCLUDE_DIR)/version.mk
+OS_VERSION:=$(if $(filter-out SNAPSHOT,$(VERSION_NUMBER)),$(VERSION_NUMBER)-)$(VERSION_CODE)
+TARGET_CFLAGS+=\
+	-DCHIP_DEVICE_CONFIG_ENABLE_TEST_SETUP_PARAMS=0 \
+	-DCHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION_STRING=\"$(PKG_VERSION)@$(OS_VERSION)\" \
+	-DCHIP_DEVICE_CONFIG_DEFAULT_DEVICE_HARDWARE_VERSION_STRING=\"-\" \
+	-DCHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME=\"$(VERSION_DIST)\" \
+	-DCHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME=\"\" \
+	-DCHIP_DEVICE_CONFIG_TEST_SERIAL_NUMBER=\"\"
+
+# https://github.com/openwrt/openwrt/issues/13016
+TARGET_CFLAGS+= -Wno-format-nonliteral
+
+# The build environment contains host tools that can be shared between targets
+CHIP_BUILD_ENV_DIR:=$(STAGING_DIR_HOST)/share/matter-build-env
+OUT_DIR:=$(PKG_BUILD_DIR)/out/openwrt
+
+define Build/Configure
+	mkdir -p $(OUT_DIR) && cd $(OUT_DIR) && \
+		$(CONFIGURE_VARS) $(PKG_BUILD_DIR)/scripts/configure \
+			--build-env-dir="$(CHIP_BUILD_ENV_DIR)" \
+			--project=examples/network-manager-app/linux \
+			--target=$(GNU_TARGET_NAME) \
+			$(CONFIGURE_OPTIONS)
+endef
+
+define Build/Compile
+	$(NINJA) -C $(OUT_DIR) matter-network-manager-app
+endef
+
+define Package/matter-netman/default/install
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/share/matter $(1)/etc/init.d $(1)/usr/share/acl.d
+	$(INSTALL_BIN) $(OUT_DIR)/matter-network-manager-app $(1)/usr/sbin
+	$(INSTALL_DATA) ./files/bootstrap.sh $(1)/usr/share/matter/
+	$(INSTALL_DATA) ./files/matter_acl.json $(1)/usr/share/acl.d
+	$(INSTALL_BIN) ./files/matter.init $(1)/etc/init.d/matter
+endef
+
+Package/matter-netman-mbedtls/install=$(Package/matter-netman/default/install)
+Package/matter-netman-openssl/install=$(Package/matter-netman/default/install)
+
+# Turris' default_postinst only enables services named in
+# /etc/services_wanted, which the updater curates, so a hand-installed
+# package would stay disabled forever. Enable and start explicitly, the
+# way other packages in this feed do. The daemon's ubus ACL is read by
+# ubusd at startup only: until the next reboot the started daemon runs
+# with restricted ubus access (no event subscriptions), which the next
+# boot heals.
+define Package/matter-netman/default/postinst
+#!/bin/sh
+if [ -z "$$IPKG_INSTROOT" ]; then
+	/etc/init.d/matter enable
+	/etc/init.d/matter restart 2>/dev/null
+fi
+endef
+
+Package/matter-netman-mbedtls/postinst=$(Package/matter-netman/default/postinst)
+Package/matter-netman-openssl/postinst=$(Package/matter-netman/default/postinst)
+
+define Package/matter-netman/default/conffiles
+$(CONF_DIR)/
+endef
+
+Package/matter-netman-mbedtls/conffiles=$(Package/matter-netman/default/conffiles)
+Package/matter-netman-openssl/conffiles=$(Package/matter-netman/default/conffiles)
+
+$(eval $(call BuildPackage,matter-netman-mbedtls))
+$(eval $(call BuildPackage,matter-netman-openssl))
