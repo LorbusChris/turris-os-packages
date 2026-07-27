@@ -1,0 +1,25 @@
+openthread-br: fix the build with GCC 14
+
+Not ours. Copied unmodified from openwrt/packages, where it is
+net/openthread-br/patches/100-fix-gcc14-build.patch and has been since
+2025-05-25. Renumbered here to fit this feed's ordering; the diff is
+byte-identical to the original.
+
+Author: Tianling Shen <cnsztl@immortalwrt.org>
+Origin: https://github.com/openwrt/packages/commit/937e2a5b809cbd21bee7bf8d1e7c2bb90ad21275
+
+The mbedtls copy vendored inside the openthread submodule guards a
+byte-by-byte tail case on the compiler; GCC 14.1 and later need the same
+guard the IAR compiler already had, or the build fails.
+
+--- a/third_party/openthread/repo/third_party/mbedtls/repo/library/common.h
++++ b/third_party/openthread/repo/third_party/mbedtls/repo/library/common.h
+@@ -199,7 +199,7 @@ static inline void mbedtls_xor(unsigned
+         uint8x16_t x = veorq_u8(v1, v2);
+         vst1q_u8(r + i, x);
+     }
+-#if defined(__IAR_SYSTEMS_ICC__)
++#if defined(__IAR_SYSTEMS_ICC__) || (defined(MBEDTLS_COMPILER_IS_GCC) && MBEDTLS_GCC_VERSION >= 140100)
+     /* This if statement helps some compilers (e.g., IAR) optimise out the byte-by-byte tail case
+      * where n is a constant multiple of 16.
+      * For other compilers (e.g. recent gcc and clang) it makes no difference if n is a compile-time
