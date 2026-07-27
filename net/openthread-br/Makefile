@@ -21,14 +21,6 @@ PKG_BUILD_DEPENDS:=libnftnl libmnl
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
 
-define Package/luci-app-openthread
-  CATEGORY:=LuCI
-  SECTION:=luci
-  SUBMENU:=3. Applications
-  TITLE:=LuCI Support for OpenThread Border Router
-  DEPENDS:=+luci-base +luci-lua-runtime
-endef
-
 define Package/openthread-br
   CATEGORY:=Network
   SECTION:=net
@@ -79,22 +71,6 @@ CMAKE_OPTIONS += \
 
 TARGET_CFLAGS += -DOPENTHREAD_POSIX_CONFIG_DAEMON_SOCKET_BASENAME=\\\"/var/run/openthread-%s\\\"
 
-define Package/luci-app-openthread/install
-	$(INSTALL_DIR) \
-		$(1)/usr/lib/lua/luci/controller/admin \
-		$(1)/usr/lib/lua/luci/view/admin_thread \
-		$(1)/www/luci-static/resources
-	$(INSTALL_DATA) \
-		$(PKG_BUILD_DIR)/src/openwrt/controller/thread.lua \
-		$(1)/usr/lib/lua/luci/controller/admin
-	$(INSTALL_DATA) \
-		$(PKG_BUILD_DIR)/src/openwrt/view/admin_thread/* \
-		$(1)/usr/lib/lua/luci/view/admin_thread
-	$(INSTALL_DATA) \
-		$(PKG_BUILD_DIR)/src/openwrt/handle_error.js \
-		$(1)/www/luci-static/resources
-endef
-
 define Package/openthread-br/install
 	$(INSTALL_DIR) \
 		$(1)/etc/uci-defaults \
@@ -107,6 +83,4 @@ define Package/openthread-br/install
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/* $(1)/usr/sbin
 endef
 
-
-$(eval $(call BuildPackage,luci-app-openthread))
 $(eval $(call BuildPackage,openthread-br))
