@@ -15,10 +15,15 @@ PROG="/usr/sbin/otbr-agent"
 	init_proto "$@"
 }
 
+# ot-ctl defaults to wpan0; steer it to the instance this protocol runs.
+otctl() {
+	"$OTCTL" -I "$device" "$@"
+}
+
 proto_openthread_add_prefix() {
 	prefix="$1"
 	# shellcheck disable=SC2086
-	[ -n "$prefix" ] && $OTCTL prefix add $prefix
+	[ -n "$prefix" ] && otctl prefix add $prefix
 }
 
 proto_openthread_init_config() {
@@ -42,6 +47,17 @@ proto_openthread_setup_error() {
 	exit 1
 }
 
+proto_openthread_setup_defer() {
+	# Not a configuration error, just too early: the host dependency
+	# registered above re-runs this setup when the backbone comes up.
+	# netifd retries a failed setup without backoff, so pace it here
+	# rather than blocking the interface for good.
+	proto_notify_error "$1" "$2"
+	sleep 5
+	proto_setup_failed "$1"
+	exit 1
+}
+
 proto_openthread_setup() {
 	interface="$1"
 	device="$2"
@@ -56,7 +72,7 @@ proto_openthread_setup() {
 	proto_add_host_dependency "$interface" "" "$backbone_network"
 	network_get_device backbone_ifname "$backbone_network"
 
-	[ -n "$backbone_ifname" ] || proto_openthread_setup_error "$interface" MISSING_BACKBONE_IFNAME
+	[ -n "$backbone_ifname" ] || proto_openthread_setup_defer "$interface" MISSING_BACKBONE_IFNAME
 	[ -n "$device" ] || proto_openthread_setup_error "$interface" MISSING_DEVICE
 	[ -n "$radio_url" ] || proto_openthread_setup_error "$interface" MISSING_RADIO_URL
 
@@ -80,12 +96,12 @@ proto_openthread_setup() {
 	ubus -t30 wait_for otbr
 
 	[ -n "$dataset" ] && {
-		$OTCTL dataset set active "$dataset"
+		otctl dataset set active "$dataset"
 	}
 
 	json_for_each_item proto_openthread_add_prefix prefix
 	ubus call otbr threadstart || proto_openthread_setup_error "$interface" MISSING_UBUS_OBJ
-	$OTCTL netdata register
+	otctl netdata register
 
 	proto_init_update "$device" 1 1
 	proto_send_update "$interface"
