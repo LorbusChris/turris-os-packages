@@ -55,7 +55,7 @@ define Package/openthread-br/description
 endef
 
 define Package/openthread-br/conffiles
-/var/lib/thread
+/etc/openthread
 endef
 
 CMAKE_OPTIONS += \
@@ -74,7 +74,8 @@ CMAKE_OPTIONS += \
 	-DOTBR_SRP_SERVER_AUTO_ENABLE=ON \
 	-DOTBR_TREL=ON \
 	-DOTBR_VENDOR_NAME=CZ.NIC \
-	-DOTBR_VERSION=$(PKG_VERSION)
+	-DOTBR_VERSION=$(PKG_VERSION) \
+	-DOT_POSIX_SETTINGS_PATH=\"/etc/openthread\"
 
 TARGET_CFLAGS += -DOPENTHREAD_POSIX_CONFIG_DAEMON_SOCKET_BASENAME=\\\"/var/run/openthread-%s\\\"
 

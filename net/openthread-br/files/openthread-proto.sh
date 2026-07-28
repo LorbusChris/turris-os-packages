@@ -46,7 +46,9 @@ proto_openthread_setup() {
 	interface="$1"
 	device="$2"
 
-	mkdir -p /var/lib/thread
+	# The settings path is compiled to /etc/openthread so the Thread network
+	# survives reboots; /var/lib is tmpfs on OpenWrt.
+	mkdir -p /etc/openthread
 
 	json_get_vars backbone_network dataset device radio_url verbose:0
 
