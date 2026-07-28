@@ -233,7 +233,20 @@ ubus call otbr threadstop
 
 ### LuCI
 
-Creating a network in LuCI appears to be broken for the moment.
+Install `luci-proto-openthread` and `luci-app-openthread`.
+
+`luci-proto-openthread` adds the `openthread` protocol to Network →
+Interfaces, so the interface described above can be created from the web
+interface rather than by editing `/etc/config/network`. Pick the device, set
+the backbone network and the radio URL; the advanced tab carries the dataset,
+the on-mesh prefixes and verbose logging. The netifd caveat above applies here
+too — the protocol only appears in the list once netifd has restarted.
+
+`luci-app-openthread` adds Network → Thread, which is where the network itself
+is managed: creating a network or joining an existing one, commissioning a
+device with its joiner credential, and the MAC filter. It also shows what the
+mesh currently looks like — the neighbour table with how long since each was
+last heard, and the router table with link quality and path cost.
 
 ### CLI
 
