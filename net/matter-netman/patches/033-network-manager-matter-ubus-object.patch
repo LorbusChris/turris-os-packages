@@ -1,4 +1,4 @@
-From 6e82cc225958ad53b10162e28a16cf160f9ec96c Mon Sep 17 00:00:00 2001
+From c16c137f98c6ae7392e84641abf395bee1210469 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Tue, 28 Jul 2026 04:11:25 +0200
 Subject: [PATCH] [network-manager] publish a matter ubus object
@@ -23,12 +23,12 @@ ACL for it, which the packaging installs.
 Assisted-By: Claude Opus 5
 ---
  examples/network-manager-app/linux/BUILD.gn   |   2 +
- .../linux/MatterUbusService.cpp               | 168 ++++++++++++++++++
+ .../linux/MatterUbusService.cpp               | 172 ++++++++++++++++++
  .../linux/MatterUbusService.h                 |  38 ++++
  .../network-manager-app/linux/UbusManager.cpp |  17 ++
- .../network-manager-app/linux/UbusManager.h   |   5 +
+ .../network-manager-app/linux/UbusManager.h   |   7 +-
  examples/network-manager-app/linux/main.cpp   |   7 +
- 6 files changed, 237 insertions(+)
+ 6 files changed, 242 insertions(+), 1 deletion(-)
  create mode 100644 examples/network-manager-app/linux/MatterUbusService.cpp
  create mode 100644 examples/network-manager-app/linux/MatterUbusService.h
 
@@ -47,10 +47,10 @@ index 27119a8276..580f03f830 100644
        "UboxUtils.cpp",
 diff --git a/examples/network-manager-app/linux/MatterUbusService.cpp b/examples/network-manager-app/linux/MatterUbusService.cpp
 new file mode 100644
-index 0000000000..6827154384
+index 0000000000..41b9d3b26f
 --- /dev/null
 +++ b/examples/network-manager-app/linux/MatterUbusService.cpp
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,172 @@
 +/*
 + *    Copyright (c) 2026 Project CHIP Authors
 + *    All rights reserved.
@@ -119,8 +119,8 @@ index 0000000000..6827154384
 +    PayloadContents payload;
 +    if (GetPayloadContents(payload, RendezvousInformationFlag::kOnNetwork) == CHIP_NO_ERROR)
 +    {
-+        char code[32]  = {};
-+        char qr[64]    = {};
++        char code[32] = {};
++        char qr[128]  = {};
 +        MutableCharSpan codeSpan(code), qrSpan(qr);
 +        if (GetManualPairingCode(codeSpan, payload) == CHIP_NO_ERROR)
 +        {
@@ -161,8 +161,12 @@ index 0000000000..6827154384
 +
 +int HandleOpenWindow(ubus_context * ctx, ubus_object * obj, ubus_request_data * req, const char * method, blob_attr * msg)
 +{
-+    blob_attr * tb[__OPEN_WINDOW_MAX];
-+    blobmsg_parse(kOpenWindowPolicy, __OPEN_WINDOW_MAX, tb, blobmsg_data(msg), blobmsg_len(msg));
++    // A caller can omit the argument table entirely; msg is NULL then.
++    blob_attr * tb[__OPEN_WINDOW_MAX] = {};
++    if (msg != nullptr)
++    {
++        blobmsg_parse(kOpenWindowPolicy, __OPEN_WINDOW_MAX, tb, blobmsg_data(msg), blobmsg_len(msg));
++    }
 +
 +    uint32_t timeout = kDefaultWindowSeconds;
 +    if (tb[OPEN_WINDOW_TIMEOUT] != nullptr)
@@ -295,10 +299,10 @@ index 9595e11ec5..9091a47dd6 100644
  {
      VerifyOrDie(mInitialized);
 diff --git a/examples/network-manager-app/linux/UbusManager.h b/examples/network-manager-app/linux/UbusManager.h
-index 5f8c8b718b..3d23bc82ef 100644
+index 5f8c8b718b..2d56879796 100644
 --- a/examples/network-manager-app/linux/UbusManager.h
 +++ b/examples/network-manager-app/linux/UbusManager.h
-@@ -50,9 +50,14 @@ public:
+@@ -50,10 +50,15 @@ public:
      void Register(UbusWatch & watch);
      void Unregister(UbusWatch & watch);
  
@@ -309,22 +313,24 @@ index 5f8c8b718b..3d23bc82ef 100644
  private:
      const char * const mUbusSocketPath;
      IntrusiveList<UbusWatch> mWatches{};
+-    bool mInitialized = false;
 +    ubus_object * mHostedObject = nullptr;
-     bool mInitialized = false;
++    bool mInitialized           = false;
  
      ///// Connection management
+ 
 diff --git a/examples/network-manager-app/linux/main.cpp b/examples/network-manager-app/linux/main.cpp
-index 9437c2fbce..8785979425 100644
+index 9437c2fbce..5b3e2c0d08 100644
 --- a/examples/network-manager-app/linux/main.cpp
 +++ b/examples/network-manager-app/linux/main.cpp
-@@ -31,6 +31,7 @@
+@@ -30,6 +30,7 @@
+ #include <lib/support/Span.h>
  
  #if MATTER_ENABLE_UBUS
- #include "ThreadBROpenThreadUbus.h"
 +#include "MatterUbusService.h"
+ #include "ThreadBROpenThreadUbus.h"
  #include "UbusManager.h"
  #else
- #include "ThreadBRFake.h"
 @@ -49,6 +50,7 @@ ByteSpan ByteSpanFromCharSpan(CharSpan span)
  
  #if MATTER_ENABLE_UBUS
@@ -345,3 +351,6 @@ index 9437c2fbce..8785979425 100644
  }
  
  void ApplicationShutdown()
+-- 
+2.55.0
+

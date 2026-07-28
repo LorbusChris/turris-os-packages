@@ -1,4 +1,4 @@
-From 0ccdb99178bfba8699cad4be856a186d2c8d2356 Mon Sep 17 00:00:00 2001
+From 432f8e1677414c717623c907e7b6b9d604a144eb Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 23:49:36 +0200
 Subject: [PATCH] [network-manager] invoke provision and deprovision
@@ -20,14 +20,14 @@ outcome either way.
 
 Assisted-By: Claude Opus 5
 ---
- .../linux/ThreadBROpenThreadUbus.cpp          | 102 ++++++++++++++----
- 1 file changed, 80 insertions(+), 22 deletions(-)
+ .../linux/ThreadBROpenThreadUbus.cpp          | 108 ++++++++++++++----
+ 1 file changed, 86 insertions(+), 22 deletions(-)
 
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-index bd77b2d3aa..4f653bf7cd 100644
+index dcc1a1b93d..83fa481ff1 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-@@ -86,10 +86,26 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetDataset(Thread::OperationalDat
+@@ -86,10 +86,27 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetDataset(Thread::OperationalDat
  
  using ErrorField = BlobMsgField<uint16_t, CHIP_CTST("Error")>;
  
@@ -41,7 +41,8 @@ index bd77b2d3aa..4f653bf7cd 100644
 +{
 +    ubus_request req = {};
 +    OpenThreadUbusBorderRouterDelegate * delegate;
-+    uint16_t otError = 0;
++    uint32_t sequence = 0;
++    uint16_t otError  = 0;
 +};
 +
 +} // namespace
@@ -55,7 +56,7 @@ index bd77b2d3aa..4f653bf7cd 100644
      VerifyOrExit(activeDataset.IsCommissioned(), err = CHIP_ERROR_INVALID_ARGUMENT);
      VerifyOrExit(mActiveDataset.IsEmpty(), err = CHIP_ERROR_INCORRECT_STATE);
      VerifyOrExit(mActivateDatasetCallback == nullptr, err = CHIP_ERROR_BUSY);
-@@ -99,22 +115,50 @@ void OpenThreadUbusBorderRouterDelegate::SetActiveDataset(const Thread::Operatio
+@@ -99,22 +116,55 @@ void OpenThreadUbusBorderRouterDelegate::SetActiveDataset(const Thread::Operatio
          BlobMsgBuf buf;
          buf.Add("dataset", activeDataset.AsByteSpan());
          ChipLogDetail(AppServer, "SetActiveDataset invoking on %d", mOtbr.ObjectID());
@@ -68,6 +69,7 @@ index bd77b2d3aa..4f653bf7cd 100644
 -                                  &err, kInvokeTimeout),
 +        invoke           = new ProvisionRequest;
 +        invoke->delegate = this;
++        invoke->sequence = sequenceNum;
 +        VerifyOrExit(!ubus_invoke_async(&mUbusManager.Context(), mOtbr.ObjectID(), "provision", buf.head, &invoke->req),
                       err = CHIP_ERROR_INTERNAL);
      }
@@ -87,17 +89,21 @@ index bd77b2d3aa..4f653bf7cd 100644
 +        // attach (>10s even for a lone border router becoming leader) would
 +        // overrun. The attach itself is reported through the
 +        // device_role_changed notification and the cluster's attributes.
-+        if (auto * cb = self->delegate->mActivateDatasetCallback; cb != nullptr)
++        // A fail-safe revert may have detached this activation and a new
++        // one may have started; complete only the activation this request
++        // belongs to.
++        if (auto * cb = self->delegate->mActivateDatasetCallback;
++            cb != nullptr && self->sequence == self->delegate->mActivateDatasetSequence)
 +        {
 +            const bool failed                        = (ret != 0 || self->otError != 0);
 +            self->delegate->mActivateDatasetCallback = nullptr;
 +            if (failed)
 +            {
 +                self->delegate->mActiveDataset.Clear();
++                self->delegate->mActivationPending = false;
 +                ChipLogError(AppServer, "provision failed: ubus %d, otError %u", ret, self->otError);
 +            }
-+            cb->OnActivateDatasetComplete(self->delegate->mActivateDatasetSequence,
-+                                          failed ? CHIP_ERROR_INTERNAL : CHIP_NO_ERROR);
++            cb->OnActivateDatasetComplete(self->delegate->mActivateDatasetSequence, failed ? CHIP_ERROR_INTERNAL : CHIP_NO_ERROR);
 +        }
 +        delete self;
 +    };
@@ -113,7 +119,7 @@ index bd77b2d3aa..4f653bf7cd 100644
      callback->OnActivateDatasetComplete(sequenceNum, err);
  }
  
-@@ -149,28 +193,42 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::SetPendingDataset(const Thread::O
+@@ -148,28 +198,42 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::SetPendingDataset(const Thread::O
  
  CHIP_ERROR OpenThreadUbusBorderRouterDelegate::RevertActiveDataset()
  {
@@ -137,8 +143,11 @@ index bd77b2d3aa..4f653bf7cd 100644
 +    // seconds away; fire the request asynchronously and let the otbr
 +    // notifications resync the cached state. Local state is cleared right
 +    // away: returning to unprovisioned is the outcome either way.
-+    auto * invoke     = new ProvisionRequest;
-+    invoke->delegate  = this;
++    mActiveDataset.Clear();
++    mAttributeChangeCallback->ReportAttributeChanged(ActiveDatasetTimestamp::Id);
++
++    auto * invoke    = new ProvisionRequest;
++    invoke->delegate = this;
 +    if (ubus_invoke_async(&mUbusManager.Context(), mOtbr.ObjectID(), "deprovision", nullptr, &invoke->req))
      {
 -        mActiveDataset.Clear();
@@ -163,10 +172,10 @@ index bd77b2d3aa..4f653bf7cd 100644
 +    ubus_complete_request_async(&mUbusManager.Context(), &invoke->req);
  
 -    return err;
-+    mActiveDataset.Clear();
-+    mAttributeChangeCallback->ReportAttributeChanged(ActiveDatasetTimestamp::Id);
-+
 +    return CHIP_NO_ERROR;
  }
  
  void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool notification)
+-- 
+2.55.0
+
