@@ -22,6 +22,26 @@ and to get it into mass storage mode you plug it in while holding the reset
 button. After the first flash with ot-rcp firmware that stops working, and you
 have to double-press reset after plugging it in instead.
 
+## The pieces
+
+The border router is spread across several packages, which install
+independently:
+
+| package | what it provides |
+| --- | --- |
+| `openthread-br` | otbr-agent, `ot-ctl`, the `openthread` netifd protocol and the ubus surface |
+| `luci-proto-openthread` | configuring that protocol from LuCI's interface pages |
+| `luci-app-openthread` | Network → Thread: creating or joining a network, commissioning devices, the neighbour and router tables, and the MAC filter |
+| `matter-netman` | the Matter Network Infrastructure Manager, so a Matter controller can read and change this router's Thread credentials over an authenticated session |
+| `luci-app-matter` | Services → Matter: the state of that daemon |
+
+Only the first is required. The LuCI packages are a web interface for what
+`ot-ctl` and `/etc/config/network` already do, and `matter-netman` is only
+needed if a Matter controller should be able to manage the Thread network.
+
+`matter-netman` ships as `matter-netman-openssl` and `matter-netman-mbedtls`,
+which differ only in the crypto library they link. Install one; they conflict.
+
 ## Packaging decisions
 
 ### Configurable package build

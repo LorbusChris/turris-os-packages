@@ -1,0 +1,7 @@
+{
+	"admin/services/matter": {
+		"title": "Matter",
+		"action": { "type": "view", "path": "matter/overview" },
+		"depends": { "acl": [ "luci-app-matter" ] }
+	}
+}

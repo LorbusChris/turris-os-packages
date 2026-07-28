@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, The OpenThread Authors.
+'use strict';
+
+let ubus = require('ubus').connect();
+
+// The Matter network manager daemon publishes a 'matter' ubus object with
+// its onboarding information and local control of the commissioning
+// window. When the daemon is down, its factory configuration still tells
+// an installed manager apart from an absent one.
+
+const MATTER_FACTORY_INI = '/etc/matter/chip_factory.ini';
+const MATTER_KVS_INI = '/etc/matter/data/chip_kvs.ini';
+
+function factory_config() {
+	let fs = require('fs');
+	let f = fs.open(MATTER_FACTORY_INI, 'r');
+	if (!f)
+		return null;
+	let cfg = {};
+	for (let line = f.read('line'); length(line); line = f.read('line')) {
+		let m = match(trim(line), /^([a-z-]+)=(.*)$/);
+		if (m)
+			cfg[m[1]] = m[2];
+	}
+	f.close();
+	return cfg;
+}
+
+function commissioned() {
+	// Fabric metadata keys (f/<index>/...) appear in the KVS once a
+	// controller has commissioned the device.
+	let fs = require('fs');
+	let f = fs.open(MATTER_KVS_INI, 'r');
+	if (!f)
+		return false;
+	let found = false;
+	for (let line = f.read('line'); length(line); line = f.read('line')) {
+		if (match(line, /^f\/[0-9a-f]+\//)) {
+			found = true;
+			break;
+		}
+	}
+	f.close();
+	return found;
+}
+
+function qr_svg(payload) {
+	// Optional: render the QR server side when qrencode is installed. The
+	// payload alphabet is base38 plus the MT: prefix, so after validation it
+	// can be embedded in a shell command as-is.
+	let fs = require('fs');
+	if (!match(payload, /^MT:[0-9A-Z.-]+$/))
+		return null;
+	if (!fs.access('/usr/bin/qrencode', 'x'))
+		return null;
+	let p = fs.popen("/usr/bin/qrencode -t svg -m 2 -o - 'MT:" + substr(payload, 3) + "'", 'r');
+	if (!p)
+		return null;
+	let svg = p.read('all');
+	p.close();
+	return length(svg) ? svg : null;
+}
+
+function onboarding() {
+	// The daemon is authoritative. The pairing code only authenticates while
+	// a commissioning window is open, so it is only handed out then; a page
+	// that always shows the code would suggest pairing is always possible.
+	let m = ubus.call('matter', 'status');
+	if (m != null) {
+		let win = m.Window ?? 'closed';
+		let result = {
+			present: true,
+			live: true,
+			commissioned: (m.Fabrics ?? 0) > 0,
+			fabrics: m.Fabrics ?? 0,
+			fabric_list: m.FabricList,
+			thread_managed: m.ThreadManaged ?? false,
+			endpoints: m.Endpoints,
+			window: win,
+			wifi_share: m.WifiShare ?? null,
+			wifi_ssid: m.WifiSsid,
+			directory: m.Directory
+		};
+		if ((win == 'basic' || win == 'enhanced') && m.ManualCode != null) {
+			result.manual_code = m.ManualCode;
+			result.qr = m.QrCode;
+			result.qr_svg = qr_svg(m.QrCode);
+		}
+		return result;
+	}
+
+	// Without the daemon there is no commissioning window and no pairing;
+	// only report that Matter management is installed but not reachable.
+	let cfg = factory_config();
+	if (!cfg)
+		return { present: false };
+	return { present: true, live: false, commissioned: commissioned(), window: 'unknown' };
+}
+
+function remove_fabric(index) {
+	// Unpairs a controller; the daemon validates the index.
+	let r = ubus.call('matter', 'remove_fabric', { index: index });
+	if (r == null)
+		return { error: 255 };
+	return { error: r.Error ?? 0, fabrics: r.Fabrics };
+}
+
+function close_window() {
+	let r = ubus.call('matter', 'close_commissioning_window', {});
+	if (r == null)
+		return { error: 255 };
+	return { error: r.Error ?? 0, window: r.Window };
+}
+
+function open_window() {
+	let r = ubus.call('matter', 'open_commissioning_window', {});
+	if (r == null)
+		return { error: 255 };
+	return { error: r.Error ?? 0, window: r.Window };
+}
+
+return {
+	'luci.matter': {
+		onboarding: {
+			args: {},
+			call: function() {
+				return onboarding();
+			}
+		},
+		open_window: {
+			args: {},
+			call: function() {
+				return open_window();
+			}
+		},
+		close_window: {
+			args: {},
+			call: function() {
+				return close_window();
+			}
+		},
+		remove_fabric: {
+			args: { index: 0 },
+			call: function(req) {
+				return remove_fabric(req.args?.index);
+			}
+		}
+	}
+};

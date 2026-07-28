@@ -1,0 +1,369 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:88
+msgid "(fabric %d)."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:438
+msgid ""
+"A commissioning window is open. Pair this device with a Matter controller, "
+"such as Home Assistant, using the code below."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:284
+msgid "Access Control"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:221
+msgid "Access point"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:291
+msgid "Administrator Commissioning"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:210
+msgid "Applying the configuration failed."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:285
+msgid "Basic Information"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:92
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:234
+msgid "Cancel"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:431
+msgid "Close commissioning window"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:303
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:315
+msgid "Clusters"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:498
+msgid "Commission this device into a Matter fabric."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:511
+msgid "Configure…"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:333
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:341
+msgid "Controller"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:216
+msgid "Credential sharing"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:283
+msgid "Descriptor"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:223
+msgid "Device identity"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:228
+msgid "Diagnostics"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:231
+msgid "Diagnostics interface"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:302
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:314
+msgid "Endpoint"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:290
+msgid "Ethernet Network Diagnostics"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:334
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:347
+msgid "Fabric ID"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:286
+msgid "General Commissioning"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:288
+msgid "General Diagnostics"
+msgstr ""
+
+#: applications/luci-app-matter/root/usr/share/rpcd/acl.d/luci-app-matter.json:3
+msgid "Grant access to Matter network manager controls"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:293
+msgid "Group Key Management"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:218
+msgid ""
+"Hand the access point credentials to Matter controllers, so they can "
+"commission Wi-Fi devices onto this network without asking for the password."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:518
+msgid "Implemented clusters"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:230
+msgid ""
+"Interface state and traffic counters are readable by any paired controller; "
+"switch off to report nothing."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:49
+msgid "Manual pairing code"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:224
+msgid "Manufacturer"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:497
+#: applications/luci-app-matter/root/usr/share/luci/menu.d/luci-app-matter.json:3
+msgid "Matter"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:226
+msgid "Matter interface"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:215
+msgid "Matter settings"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:219
+msgid "Network"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:287
+msgid "Network Commissioning"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:294
+msgid "Network Identity Management"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:322
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:363
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:378
+msgid "No information available"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:335
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:348
+msgid "Node ID"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:514
+msgid "Onboarding"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:450
+msgid "Open commissioning window"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:454
+msgid "Opening the commissioning window failed."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:292
+msgid "Operational Credentials"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:232
+msgid ""
+"Optional override: report the Ethernet diagnostics of this interface instead "
+"of the Matter interface — for example a physical port rather than the "
+"bridge, which has no link details of its own."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:222
+msgid ""
+"Optional wifi-iface section name, overriding the automatic choice of the "
+"first access point on that network."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:501
+msgid "Paired controllers"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:53
+msgid "QR code"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:107
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:355
+msgid "Remove"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:86
+msgid "Remove pairing"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:101
+msgid "Removing the pairing failed."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:229
+msgid "Report Ethernet diagnostics"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:225
+msgid ""
+"Reported to Matter controllers. Left empty, the manufacturer the firmware "
+"states is used."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:239
+msgid "Save & Apply"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:217
+msgid "Share Wi-Fi credentials"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:505
+msgid "Shared network information"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:384
+msgid "Sharing credentials of"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:72
+msgid "Test vendor 1"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:73
+msgid "Test vendor 2"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:74
+msgid "Test vendor 3"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:75
+msgid "Test vendor 4"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:90
+msgid ""
+"That controller loses access to this device immediately, including any "
+"Thread network credentials it manages here. It has to commission the device "
+"again to regain access."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:425
+msgid ""
+"The Matter network manager daemon is not reachable; pairing is unavailable."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:422
+msgid "The Matter network manager is not installed on this device."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:267
+msgid "The Matter service cannot be queried (ubus error %d)."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:227
+msgid ""
+"The network interface this device is reachable on, normally the LAN bridge. "
+"Controllers are told it is this device's interface, and it supplies the "
+"Ethernet diagnostics unless overridden below."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:220
+msgid ""
+"The network whose access point is shared. Guest networks are excluded by "
+"choosing the network their access point is not attached to."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:447
+msgid ""
+"This device is commissioned into a Matter fabric. Open a commissioning "
+"window to add it to another controller; the pairing code and QR code are "
+"shown while the window is open."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:448
+msgid ""
+"This device is not commissioned yet. Open a commissioning window to pair it "
+"with a Matter controller; the pairing code and QR code are shown while the "
+"window is open."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:364
+msgid "This device is not paired with any Matter controller."
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:87
+msgid "This unpairs the controller"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:296
+msgid "Thread Border Router Management"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:289
+msgid "Thread Network Diagnostics"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:297
+msgid "Thread Network Directory"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:407
+msgid "Thread network directory"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:295
+msgid "Wi-Fi Network Management"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:400
+msgid "Wi-Fi network"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:140
+msgid "automatic"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:410
+msgid "empty"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:147
+msgid "from the firmware"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:315
+msgid "none"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:386
+msgid "not shared"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:161
+msgid "the Matter interface"
+msgstr ""
+
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:382
+#: applications/luci-app-matter/htdocs/luci-static/resources/view/matter/overview.js:409
+msgid "unknown"
+msgstr ""
