@@ -1,0 +1,27 @@
+{
+	"luci-app-matter": {
+		"description": "Grant access to Matter network manager controls",
+		"read": {
+			"ubus": {
+				"luci.matter": [
+					"onboarding"
+				]
+			},
+			"uci": [
+				"matter"
+			]
+		},
+		"write": {
+			"ubus": {
+				"luci.matter": [
+					"open_window",
+					"close_window",
+					"remove_fabric"
+				]
+			},
+			"uci": [
+				"matter"
+			]
+		}
+	}
+}
