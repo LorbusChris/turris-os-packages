@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=openthread-br
 PKG_VERSION:=2026.08.0
 PKG_SOURCE_VERSION:=v$(PKG_VERSION)
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=https://github.com/openthread/ot-br-posix.git
@@ -73,11 +73,14 @@ TARGET_CFLAGS += -DOPENTHREAD_POSIX_CONFIG_DAEMON_SOCKET_BASENAME=\\\"/var/run/o
 
 define Package/openthread-br/install
 	$(INSTALL_DIR) \
+		$(1)/etc/hotplug.d/usb \
 		$(1)/etc/uci-defaults \
 		$(1)/lib/netifd/proto \
 		$(1)/usr/libexec/openthread \
 		$(1)/usr/sbin
 	$(INSTALL_BIN) ./files/openthread-proto.sh $(1)/lib/netifd/proto/openthread.sh
+	$(INSTALL_BIN) ./files/otbr-rcp $(1)/usr/sbin
+	$(INSTALL_DATA) ./files/otbr-rcp.hotplug $(1)/etc/hotplug.d/usb/50-otbr-rcp
 	$(INSTALL_BIN) ./files/openthread.uci-defaults $(1)/etc/uci-defaults/99-openthread-firewall
 	$(INSTALL_BIN) ./files/openthread-firewall.sh $(1)/usr/libexec/openthread/firewall.sh
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/* $(1)/usr/sbin
