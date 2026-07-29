@@ -25,9 +25,9 @@ PKG_SOURCE_SUBMODULES:=\
   third_party/nlio/repo
 
 # Hash can be regenerated with make package/matter-netman/check FIXUP=1
-PKG_SOURCE_DATE:=2026-06-13
-PKG_SOURCE_VERSION:=b39eff6ed09e92344c3c6cc9a5a1b495a469bbfd
-PKG_MIRROR_HASH:=cc87d6df5cc945309bea4c810ba90081fa59dfaaa1daedf9fa199d17e3f313f8
+PKG_SOURCE_DATE:=2026-07-30
+PKG_SOURCE_VERSION:=72ecdc2bca57e99b3defea68eb3bcc5bd8bebdbd
+PKG_MIRROR_HASH:=6812910e012294a9b812bc7550e352e981627e8bec932d3634e098be68ebe7fb
 
 # Use local source dir for development
 # USE_SOURCE_DIR:=$(HOME)/workspace/connectedhomeip
@@ -126,11 +126,16 @@ TARGET_CFLAGS+=\
 # Device Information. Runtime information is configured by bootstrap.sh
 include $(INCLUDE_DIR)/version.mk
 OS_VERSION:=$(if $(filter-out SNAPSHOT,$(VERSION_NUMBER)),$(VERSION_NUMBER)-)$(VERSION_CODE)
+# The identity strings are gn arguments rather than -D in TARGET_CFLAGS: the
+# configure script splits CFLAGS on whitespace, so a define whose value has a
+# space in it does not survive. The serial number stays a define because its
+# gn argument emits nothing for the empty string, which is the value wanted.
+CONFIGURE_OPTIONS+=\
+	--device-config-device-software-version-string="$(PKG_VERSION)@$(OS_VERSION)" \
+	--device-config-device-hardware-version-string="-" \
+	--device-config-device-vendor-name="$(VERSION_DIST)"
 TARGET_CFLAGS+=\
 	-DCHIP_DEVICE_CONFIG_ENABLE_TEST_SETUP_PARAMS=0 \
-	-DCHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION_STRING=\"$(PKG_VERSION)@$(OS_VERSION)\" \
-	-DCHIP_DEVICE_CONFIG_DEFAULT_DEVICE_HARDWARE_VERSION_STRING=\"-\" \
-	-DCHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME=\"$(VERSION_DIST)\" \
 	-DCHIP_DEVICE_CONFIG_TEST_SERIAL_NUMBER=\"\"
 
 # https://github.com/openwrt/openwrt/issues/13016
@@ -154,11 +159,12 @@ define Build/Compile
 endef
 
 define Package/matter-netman/default/install
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/share/matter $(1)/etc/init.d $(1)/usr/share/acl.d $(1)/etc/hotplug.d/iface
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/share/matter $(1)/etc/init.d $(1)/usr/share/acl.d $(1)/etc/hotplug.d/iface $(1)/etc/config
 	$(INSTALL_BIN) $(OUT_DIR)/matter-network-manager-app $(1)/usr/sbin
 	$(INSTALL_DATA) ./files/bootstrap.sh $(1)/usr/share/matter/
 	$(INSTALL_DATA) ./files/matter_acl.json $(1)/usr/share/acl.d
 	$(INSTALL_BIN) ./files/matter.init $(1)/etc/init.d/matter
+	$(INSTALL_CONF) ./files/matter.config $(1)/etc/config/matter
 	$(INSTALL_BIN) ./files/matter.iface-hotplug $(1)/etc/hotplug.d/iface/99-matter
 endef
 
@@ -185,6 +191,7 @@ Package/matter-netman-openssl/postinst=$(Package/matter-netman/default/postinst)
 
 define Package/matter-netman/default/conffiles
 $(CONF_DIR)/
+/etc/config/matter
 endef
 
 Package/matter-netman-mbedtls/conffiles=$(Package/matter-netman/default/conffiles)

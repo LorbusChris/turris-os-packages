@@ -14,7 +14,7 @@ is_backbone=0
 check_iface() {
 	local proto backbone
 	config_get proto "$1" proto
-	[ "$proto" = "thread" -o "$proto" = "openthread" ] || return 0
+	[ "$proto" = "openthread" ] || return 0
 	config_get backbone "$1" backbone_network
 	[ -n "$backbone" ] && [ "$backbone" = "$INTERFACE" ] && is_backbone=1
 }
