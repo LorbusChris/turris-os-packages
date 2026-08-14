@@ -26,8 +26,8 @@ PKG_SOURCE_SUBMODULES:=\
 
 # Hash can be regenerated with make package/matter-netman/check FIXUP=1
 PKG_SOURCE_DATE:=2026-07-30
-PKG_SOURCE_VERSION:=72ecdc2bca57e99b3defea68eb3bcc5bd8bebdbd
-PKG_MIRROR_HASH:=6812910e012294a9b812bc7550e352e981627e8bec932d3634e098be68ebe7fb
+PKG_SOURCE_VERSION:=37ae0b7ec769117ef4711ef1385f09c8fa59866d
+PKG_MIRROR_HASH:=935d4d4b7124d18fa079671e11c300899a8478c9e43c9959233693fbfabb5b5f
 
 # Use local source dir for development
 # USE_SOURCE_DIR:=$(HOME)/workspace/connectedhomeip
