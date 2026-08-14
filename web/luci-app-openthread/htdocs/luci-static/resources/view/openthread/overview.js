@@ -70,13 +70,13 @@ var callMacfilterClear = rpc.declare({
 var callMacfilterAdd = rpc.declare({
 	object: 'luci.openthread',
 	method: 'macfilter_add',
-	params: [ 'addr', 'state' ]
+	params: [ 'addr', 'state', 'confirmed' ]
 });
 
 var callMacfilterRemove = rpc.declare({
 	object: 'luci.openthread',
 	method: 'macfilter_remove',
-	params: [ 'addr', 'state' ]
+	params: [ 'addr', 'state', 'confirmed' ]
 });
 
 var callCommissionerStart = rpc.declare({
@@ -991,8 +991,10 @@ function handleBlock(bss, neigh) {
 		function() {
 			// Passing the mode along switches the filter on when this is
 			// the only entry; the daemon reports an existing entry as
-			// Already and leaves the mode alone next to leftovers.
-			return callMacfilterAdd(bss.ExtAddress, 'denylist');
+			// Already and leaves the mode alone next to leftovers. This
+			// modal is the acknowledgement the backend's mode-activation
+			// guard asks for.
+			return callMacfilterAdd(bss.ExtAddress, 'denylist', true);
 		});
 }
 
@@ -1004,7 +1006,7 @@ function handleAllowlistBlock(bss) {
 		blockWarning(),
 		_('Block'), 'cbi-button cbi-button-negative',
 		function() {
-			return callMacfilterRemove(bss.ExtAddress, 'allowlist');
+			return callMacfilterRemove(bss.ExtAddress, 'allowlist', true);
 		});
 }
 
@@ -1016,7 +1018,7 @@ function handleAllow(bss) {
 		[ _('This does not commission the device: joining the network still requires its credentials. The filter list is kept in memory and does not survive a border router restart.') ],
 		_('Allow'), 'cbi-button cbi-button-positive',
 		function() {
-			return callMacfilterAdd(bss.ExtAddress, 'allowlist');
+			return callMacfilterAdd(bss.ExtAddress, 'allowlist', true);
 		});
 }
 

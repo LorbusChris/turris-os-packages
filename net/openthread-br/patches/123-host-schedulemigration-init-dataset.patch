@@ -1,4 +1,4 @@
-From f994ed5f66536413d4b0c7708024509b5ca8e813 Mon Sep 17 00:00:00 2001
+From 252b7864f94b47ef5a6d8067341f02b9cc76aa02 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 22:16:05 +0200
 Subject: [PATCH] [host] value-initialise the dataset in ScheduleMigration
@@ -12,8 +12,6 @@ musl), where the stack bytes are reliably nonzero: every migration
 attempt failed with OT_ERROR_REJECTED.
 
 Value-initialise the dataset so only the caller's TLVs are sent.
-
-Assisted-By: Claude Opus 5
 ---
  src/host/rcp_host.cpp | 9 ++++++---
  1 file changed, 6 insertions(+), 3 deletions(-)

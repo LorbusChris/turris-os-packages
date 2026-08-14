@@ -1,4 +1,4 @@
-From 4dd8f89dd8a65d4cc44ac35437b5105d05fdf515 Mon Sep 17 00:00:00 2001
+From 3f29a5e59cf121722f5841b5e22b5aafce480558 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 04:00:27 +0200
 Subject: [PATCH] [network-manager] report the identity and Thread state the
@@ -35,6 +35,7 @@ interface inherited from the environment made the platform describe a
 different one.
 
 Assisted-By: Claude Opus 5
+Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
 ---
  .../linux/NimInstanceInfo.cpp                 | 14 +++-
  .../linux/NimInstanceInfo.h                   |  4 +
@@ -105,7 +106,7 @@ index d4c907cd76..dcdd06f9e8 100644
      std::string mHardware;
  };
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-index f5ae5a61f9..cbe0a03e77 100644
+index 1a32965303..ac993e4d04 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 @@ -27,6 +27,8 @@
@@ -117,10 +118,10 @@ index f5ae5a61f9..cbe0a03e77 100644
  
  using namespace chip::ubus;
  using namespace chip::app::Clusters::ThreadBorderRouterManagement::Attributes;
-@@ -46,16 +48,70 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::Init(AttributeChangeCallback * at
-                         static_cast<decltype(this)>(req->priv)->OnDataReceived(msg, false);
-                     }),
-                     self, kInvokeTimeout);
+@@ -59,16 +61,70 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::Init(AttributeChangeCallback * at
+         {
+             self->mRevertPending = false;
+         }
 +        self->FetchThreadVersion();
      });
      mOtbr.SetNotificationCallback([](UbusWatch & watch, void * appState, ubus_request_data * req, const char * notification,
@@ -188,7 +189,7 @@ index f5ae5a61f9..cbe0a03e77 100644
      CopyCharSpanToMutableCharSpanWithTruncation("OpenThread BorderRouter"_span, borderRouterName);
  }
  
-@@ -66,12 +122,15 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetBorderAgentId(MutableByteSpan
+@@ -79,12 +135,15 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetBorderAgentId(MutableByteSpan
  
  uint16_t OpenThreadUbusBorderRouterDelegate::GetThreadVersion()
  {
@@ -206,7 +207,7 @@ index f5ae5a61f9..cbe0a03e77 100644
  }
  
  CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetDataset(Thread::OperationalDataset & dataset, DatasetType type)
-@@ -254,7 +313,16 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
+@@ -297,7 +356,16 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
      BlobMsgField<ByteSpan, CHIP_CTST("ActiveDataset")> activeDataset;
      BlobMsgField<ByteSpan, CHIP_CTST("PendingDataset")> pendingDataset;
      BlobMsgField<bool, CHIP_CTST("Attached")> attached;
@@ -225,13 +226,13 @@ index f5ae5a61f9..cbe0a03e77 100644
      if (!mBorderAgentIDValid && borderAgentID.has_value() && borderAgentID->size() == sizeof(mBorderAgentID))
      {
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
-index 2f655242f6..199ac585e6 100644
+index c0e5ec498e..5983c0990c 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
-@@ -67,6 +67,12 @@ public:
- 
- private:
+@@ -69,6 +69,12 @@ private:
      void OnDataReceived(blob_attr * msg, bool notification);
+     CHIP_ERROR SubmitDeprovision();
+     void ResyncFromOtbr();
 +    // otbr-agent went away: nothing cached from it describes the present any
 +    // more, so it is dropped rather than kept being reported as current.
 +    void OnOtbrLost();
@@ -241,7 +242,7 @@ index 2f655242f6..199ac585e6 100644
  
      // Invokes an otbr method that takes a hex encoded dataset argument.
      CHIP_ERROR InvokeWithDataset(const char * method, const Thread::OperationalDataset & dataset);
-@@ -81,6 +87,13 @@ private:
+@@ -83,6 +89,13 @@ private:
      bool mBorderAgentIDValid = false;
      uint8_t mBorderAgentID[app::Clusters::ThreadBorderRouterManagement::kBorderAgentIdLength];
  

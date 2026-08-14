@@ -1,4 +1,4 @@
-From acd687a893bb181902244cb7b3e4dd2240ac1a8c Mon Sep 17 00:00:00 2001
+From 4a7edf5c23577f2dfb23ca9188f0f859cf2419a7 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 04:00:27 +0200
 Subject: [PATCH] [network-manager] build this example as the device it ships
@@ -17,6 +17,7 @@ which the matter ubus object serves from its status method.
 Also list the two headers that were missing from the ubus sources.
 
 Assisted-By: Claude Opus 5
+Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
 ---
  examples/network-manager-app/linux/BUILD.gn         |  2 ++
  .../linux/include/CHIPProjectAppConfig.h            | 13 +++++++++++++

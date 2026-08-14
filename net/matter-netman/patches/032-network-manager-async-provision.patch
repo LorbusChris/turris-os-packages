@@ -1,4 +1,4 @@
-From 432f8e1677414c717623c907e7b6b9d604a144eb Mon Sep 17 00:00:00 2001
+From ddf48a69571946862cb8c9aeb1e241bf5f8d5c1a Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 23:49:36 +0200
 Subject: [PATCH] [network-manager] invoke provision and deprovision
@@ -24,10 +24,10 @@ Assisted-By: Claude Opus 5
  1 file changed, 86 insertions(+), 22 deletions(-)
 
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-index dcc1a1b93d..83fa481ff1 100644
+index 09a03ac458..0803ce7831 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-@@ -86,10 +86,27 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetDataset(Thread::OperationalDat
+@@ -93,10 +93,27 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetDataset(Thread::OperationalDat
  
  using ErrorField = BlobMsgField<uint16_t, CHIP_CTST("Error")>;
  
@@ -56,7 +56,7 @@ index dcc1a1b93d..83fa481ff1 100644
      VerifyOrExit(activeDataset.IsCommissioned(), err = CHIP_ERROR_INVALID_ARGUMENT);
      VerifyOrExit(mActiveDataset.IsEmpty(), err = CHIP_ERROR_INCORRECT_STATE);
      VerifyOrExit(mActivateDatasetCallback == nullptr, err = CHIP_ERROR_BUSY);
-@@ -99,22 +116,55 @@ void OpenThreadUbusBorderRouterDelegate::SetActiveDataset(const Thread::Operatio
+@@ -106,22 +123,55 @@ void OpenThreadUbusBorderRouterDelegate::SetActiveDataset(const Thread::Operatio
          BlobMsgBuf buf;
          buf.Add("dataset", activeDataset.AsByteSpan());
          ChipLogDetail(AppServer, "SetActiveDataset invoking on %d", mOtbr.ObjectID());
@@ -119,7 +119,7 @@ index dcc1a1b93d..83fa481ff1 100644
      callback->OnActivateDatasetComplete(sequenceNum, err);
  }
  
-@@ -148,28 +198,42 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::SetPendingDataset(const Thread::O
+@@ -155,28 +205,42 @@ CHIP_ERROR OpenThreadUbusBorderRouterDelegate::SetPendingDataset(const Thread::O
  
  CHIP_ERROR OpenThreadUbusBorderRouterDelegate::RevertActiveDataset()
  {

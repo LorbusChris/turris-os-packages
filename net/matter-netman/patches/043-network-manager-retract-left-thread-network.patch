@@ -1,4 +1,4 @@
-From 826932e30058bccc758b2682f34f818bf99ee44c Mon Sep 17 00:00:00 2001
+From a028729ac994911c8bbce5e8121a5ba54e89be81 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 10:30:13 +0200
 Subject: [PATCH] [network-manager] retract the Thread network the border
@@ -26,6 +26,7 @@ yet", and losing otbr-agent returns the dataset to unknown rather than
 reporting it as gone.
 
 Assisted-By: Claude Opus 5
+Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
 ---
  .../linux/ThreadBROpenThreadUbus.cpp          |  20 ++-
  .../linux/ThreadBROpenThreadUbus.h            |  14 +-
@@ -33,10 +34,10 @@ Assisted-By: Claude Opus 5
  3 files changed, 142 insertions(+), 16 deletions(-)
 
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-index cbe0a03e77..97ac76ca7b 100644
+index ac993e4d04..ae27069cb0 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-@@ -69,6 +69,7 @@ void OpenThreadUbusBorderRouterDelegate::OnOtbrLost()
+@@ -82,6 +82,7 @@ void OpenThreadUbusBorderRouterDelegate::OnOtbrLost()
      // one reading nothing.
      mBorderAgentIDValid = false;
      mInterfaceEnabled   = false;
@@ -44,7 +45,7 @@ index cbe0a03e77..97ac76ca7b 100644
      mActiveDataset.Clear();
      mPendingDataset.Clear();
  
-@@ -333,17 +334,30 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
+@@ -376,17 +377,30 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
  
      if (activeDataset.has_value())
      {
@@ -79,7 +80,7 @@ index cbe0a03e77..97ac76ca7b 100644
                  mDatasetObserver(mDatasetObserverContext, mActiveDataset);
              }
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
-index 199ac585e6..23729f9db1 100644
+index 5983c0990c..758468ab7c 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
 @@ -33,14 +33,16 @@ public:
@@ -103,7 +104,7 @@ index 199ac585e6..23729f9db1 100644
          {
              observer(context, mActiveDataset);
          }
-@@ -94,6 +96,10 @@ private:
+@@ -96,6 +98,10 @@ private:
      // Thread version code as otbr reports it; 0 until it has been asked.
      uint16_t mThreadVersion = 0;
  

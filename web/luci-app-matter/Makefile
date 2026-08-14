@@ -1,5 +1,4 @@
 #
-# Copyright (c) 2026 The OpenThread Authors
 #
 # This is free software, licensed under the BSD-3-Clause license.
 #

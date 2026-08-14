@@ -1,4 +1,4 @@
-From dbe6618e80400db6a5290fc64a5ed88b5ab0fb94 Mon Sep 17 00:00:00 2001
+From 2476ee57b0ec39beac6c0f48da4515f74ffa9274 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:29:24 +0200
 Subject: [PATCH] [host] do not report the result of Leave twice
@@ -14,8 +14,6 @@ do the same here.
 This is currently latent: the only caller of ThreadHost::Leave() is the NCP
 D-Bus object, and NcpHost::Leave() is unaffected. It becomes reachable as
 soon as anything calls it in RCP mode.
-
-Assisted-By: Claude Opus 5
 ---
  src/host/rcp_host.cpp | 1 +
  1 file changed, 1 insertion(+)
