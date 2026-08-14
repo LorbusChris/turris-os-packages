@@ -1,4 +1,4 @@
-From d5cb151c0b6d2e63224c0333503fd49ea892b522 Mon Sep 17 00:00:00 2001
+From bfc0bc60f0ac7ac5cb2cdf3fd1b1448298c45789 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:34:19 +0200
 Subject: [PATCH] [network-manager] support pending datasets in the ubus
@@ -30,10 +30,10 @@ Assisted-By: Claude Opus 5
  2 files changed, 100 insertions(+), 7 deletions(-)
 
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-index f76173b3ee..dcc1a1b93d 100644
+index 708ac27fa3..09a03ac458 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-@@ -76,9 +76,11 @@ bool OpenThreadUbusBorderRouterDelegate::GetInterfaceEnabled()
+@@ -83,9 +83,11 @@ bool OpenThreadUbusBorderRouterDelegate::GetInterfaceEnabled()
  
  CHIP_ERROR OpenThreadUbusBorderRouterDelegate::GetDataset(Thread::OperationalDataset & dataset, DatasetType type)
  {
@@ -48,7 +48,7 @@ index f76173b3ee..dcc1a1b93d 100644
      return CHIP_NO_ERROR;
  }
  
-@@ -116,12 +118,67 @@ exit:
+@@ -123,12 +125,67 @@ exit:
      callback->OnActivateDatasetComplete(sequenceNum, err);
  }
  
@@ -117,7 +117,7 @@ index f76173b3ee..dcc1a1b93d 100644
  
      if (!mBorderAgentIDValid && borderAgentID.has_value() && borderAgentID->size() == sizeof(mBorderAgentID))
      {
-@@ -145,6 +202,36 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
+@@ -152,6 +209,36 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
          }
      }
  

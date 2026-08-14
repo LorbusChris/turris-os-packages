@@ -1,4 +1,4 @@
-From 64f8a13daae3f2a6f47f68b0c86dfbd78bd85555 Mon Sep 17 00:00:00 2001
+From 64abeb3756031b3c1e754f4c9a72439ef372dd42 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Thu, 30 Jul 2026 07:29:29 +0200
 Subject: [PATCH] [app][platform] add hooks for out-of-process network
@@ -11,24 +11,25 @@ the Matter process:
   lets an application substitute the provider behind codegen-integrated
   cluster instances, which otherwise requires the in-process Thread
   stack. Passing nullptr restores the default.
-- Thread Network Directory: a Storage() accessor on the server so an
-  application can seed the directory with networks it knows about on
-  its own, e.g. a border router recording its own network.
+- Thread Network Directory: a Storage() accessor on the server for read
+  access, e.g. to enumerate what the application recorded. Mutations go
+  through the cluster's application API, so subscribers see them.
 - Linux ConnectivityUtils: honour CHIP_ETHERNET_INTERFACE when picking
   the Ethernet diagnostics interface. On a multi-homed host the first
   ethtool-capable interface is not necessarily the one the node lives
   on; a router typically speaks through a bridge.
 
 No behavior changes unless a hook is used; the network-manager example
-uses all three in the following commit.
+uses all three in the following commits.
 
 Assisted-By: Claude Fable 5
+Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
 ---
  .../CodegenIntegration.cpp                        | 15 +++++++++++++--
  .../ThreadNetworkDiagnosticsProvider.h            |  6 ++++++
- .../CodegenIntegration.h                          |  4 ++++
+ .../CodegenIntegration.h                          |  5 +++++
  src/platform/Linux/ConnectivityUtils.cpp          | 11 +++++++++++
- 4 files changed, 34 insertions(+), 2 deletions(-)
+ 4 files changed, 35 insertions(+), 2 deletions(-)
 
 diff --git a/src/app/clusters/thread-network-diagnostics-server/CodegenIntegration.cpp b/src/app/clusters/thread-network-diagnostics-server/CodegenIntegration.cpp
 index 7bc1aef635..e9ece74084 100644
@@ -81,20 +82,21 @@ index 619dce5e39..38c3153695 100644
 +
  } // namespace chip::app::Clusters::ThreadNetworkDiagnostics
 diff --git a/src/app/clusters/thread-network-directory-server/CodegenIntegration.h b/src/app/clusters/thread-network-directory-server/CodegenIntegration.h
-index 329f3d5de3..020da46296 100644
+index ad61038bef..f7dbef351c 100644
 --- a/src/app/clusters/thread-network-directory-server/CodegenIntegration.h
 +++ b/src/app/clusters/thread-network-directory-server/CodegenIntegration.h
-@@ -46,6 +46,10 @@ public:
+@@ -46,6 +46,11 @@ public:
  
      CHIP_ERROR Init();
  
-+    // Grants the application access to the underlying storage, e.g. to seed
-+    // the directory with networks it knows about on its own.
++    // Grants the application read access to the underlying storage, e.g. to
++    // enumerate what it recorded. Mutations go through the cluster below, so
++    // that subscribers see them.
 +    ThreadNetworkDirectoryStorage & Storage() { return mStorage; }
 +
- private:
-     DefaultThreadNetworkDirectoryStorage mStorage;
-     RegisteredServerCluster<ThreadNetworkDirectoryCluster> mCluster;
+     // Records a network the application knows of its own accord, e.g. the
+     // border router's own, replacing any entry with the same Extended PAN ID.
+     CHIP_ERROR AddOrUpdateNetwork(const ThreadNetworkDirectoryStorage::ExtendedPanId & extendedPanId, ByteSpan dataset)
 diff --git a/src/platform/Linux/ConnectivityUtils.cpp b/src/platform/Linux/ConnectivityUtils.cpp
 index 635b4ecfef..1f13d1775a 100644
 --- a/src/platform/Linux/ConnectivityUtils.cpp

@@ -1,4 +1,4 @@
-From fb921e217d4733ca4c701e068b16c2d6f81d1e17 Mon Sep 17 00:00:00 2001
+From 0604fc480d3faa51275f7a07856659fc02424983 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 22:52:46 +0200
 Subject: [PATCH] [host] erase the dataset in Leave based on the device role
@@ -17,8 +17,6 @@ attached with its dataset intact.
 Branch on the actual device role instead. A detached-but-enabled stack
 now goes through the graceful-detach path, which disables the protocol
 before erasing.
-
-Assisted-By: Claude Opus 5
 ---
  src/host/rcp_host.cpp | 8 +++++++-
  1 file changed, 7 insertions(+), 1 deletion(-)

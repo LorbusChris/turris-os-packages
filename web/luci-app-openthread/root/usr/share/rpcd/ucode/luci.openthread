@@ -464,7 +464,7 @@ return {
 				networkkey:  'string',
 				pskc:        'string',
 				macfilter:   'string',
-				macfilter_confirmed: false,
+				macfilter_confirmed: true,
 			},
 			call: function(req) {
 				let a = req.args;
@@ -597,7 +597,7 @@ return {
 			}
 		},
 		macfilter_clear: {
-			args: { confirmed: false },
+			args: { confirmed: true },
 			call: function(req) {
 				let snap = macfilter_snapshot();
 				if (snap == null)

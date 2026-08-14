@@ -1,4 +1,4 @@
-From 763d3acd0a649467e2c075c4099e1189e1b718b7 Mon Sep 17 00:00:00 2001
+From 07c0c134835d80e75dfd93fa5767b91b90f060eb Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Thu, 30 Jul 2026 07:29:29 +0200
 Subject: [PATCH] [network-manager] serve the full NIM cluster set from OpenWrt
@@ -37,6 +37,7 @@ uplink is what the whole node runs over, and the Linux platform already
 provides the counters and PHY data.
 
 Assisted-By: Claude Fable 5
+Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
 ---
  examples/network-manager-app/linux/BUILD.gn   |   6 +
  .../linux/MatterUbusService.cpp               | 171 +++++++++
@@ -93,7 +94,7 @@ index 580f03f830..5d854c9dc7 100644
      libs += [
        "ubox",
 diff --git a/examples/network-manager-app/linux/MatterUbusService.cpp b/examples/network-manager-app/linux/MatterUbusService.cpp
-index 41b9d3b26f..e1e812ed77 100644
+index 61a6e1aa73..75cda5cf4f 100644
 --- a/examples/network-manager-app/linux/MatterUbusService.cpp
 +++ b/examples/network-manager-app/linux/MatterUbusService.cpp
 @@ -19,11 +19,18 @@
@@ -288,8 +289,8 @@ index 41b9d3b26f..e1e812ed77 100644
  };
  
  ubus_object_type sObjectType = UBUS_OBJECT_TYPE("matter", sMethods);
-@@ -169,4 +324,20 @@ CHIP_ERROR MatterUbusService::Init()
-     return CHIP_NO_ERROR;
+@@ -168,4 +323,20 @@ CHIP_ERROR MatterUbusService::Init()
+     return mUbusManager.Host(sObject);
  }
  
 +void MatterUbusService::SetReloadWifiHandler(ReloadWifiHandler handler, void * context)
@@ -899,10 +900,10 @@ index 0000000000..d4c907cd76
 +
 +} // namespace chip
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-index 297f7e41b0..f5ae5a61f9 100644
+index 24b22e9836..1a32965303 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
-@@ -275,6 +275,10 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
+@@ -318,6 +318,10 @@ void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool no
              {
                  mAttributeChangeCallback->ReportAttributeChanged(ActiveDatasetTimestamp::Id);
              }
@@ -914,7 +915,7 @@ index 297f7e41b0..f5ae5a61f9 100644
      }
  
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
-index c2098536c9..2f655242f6 100644
+index ce53dcc53a..c0e5ec498e 100644
 --- a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
 +++ b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.h
 @@ -27,10 +27,25 @@ namespace chip {
@@ -943,7 +944,7 @@ index c2098536c9..2f655242f6 100644
      void GetBorderRouterName(MutableCharSpan & borderRouterName) override;
      CHIP_ERROR GetBorderAgentId(MutableByteSpan & borderAgentId) override;
      uint16_t GetThreadVersion() override;
-@@ -57,6 +72,8 @@ private:
+@@ -59,6 +74,8 @@ private:
      CHIP_ERROR InvokeWithDataset(const char * method, const Thread::OperationalDataset & dataset);
  
      AttributeChangeCallback * mAttributeChangeCallback;

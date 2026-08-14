@@ -1,0 +1,189 @@
+From b73cdacf86a5ce1afc858f83cb1e56485790b755 Mon Sep 17 00:00:00 2001
+From: Christian Glombek <c.glombek@cosa.systems>
+Date: Thu, 13 Aug 2026 17:18:42 +0200
+Subject: [PATCH] [host] disable Thread before erasing the dataset in Leave
+
+A graceful detach only takes the device to the detached role, it does not stop
+the stack, and otInstanceErasePersistentInfo() succeeds only in the disabled
+role. Leave's detach callback therefore failed the erase with INVALID_STATE,
+logged a warning, told the caller OT_ERROR_NONE, and left OpenThread free to
+start re-attaching with the dataset it was asked to erase.
+
+After the detach completes, disable Thread and IPv6 the way DisableThreadAfterDetach()
+does, walk mThreadEnabledState through kStateDisabling to kStateDisabled, and
+only then erase. ConditionalErasePersistentInfo() now returns the error so both
+of its callers propagate a failed erase to the receiver instead of swallowing it.
+
+Cover Leave in the RcpHost API tests: leaving with erase while attached must
+end with the stack disabled, the dataset gone and subscribers told; the same
+must hold when the stack was brought up outside SetThreadEnabled(), where only
+the device role says Thread is running. The existing Leave-while-enabled case
+also needed its wait fixed: it waited with a zero timeout, which was satisfied
+on main only by the doubled early report that this series removes -- without
+it the receiver cannot fire within the wait and the case passes vacuously.
+It now waits and asserts the result arrived.
+---
+ src/host/rcp_host.cpp             | 46 +++++++++++++++++++++-------
+ src/host/rcp_host.hpp             |  3 +-
+ tests/gtest/test_rcp_host_api.cpp | 50 ++++++++++++++++++++++++++++++-
+ 3 files changed, 86 insertions(+), 13 deletions(-)
+
+diff --git a/src/host/rcp_host.cpp b/src/host/rcp_host.cpp
+index e02d0883..e4f8fb80 100644
+--- a/src/host/rcp_host.cpp
++++ b/src/host/rcp_host.cpp
+@@ -608,17 +608,14 @@ void RcpHost::Leave(bool aEraseDataset, const AsyncResultReceiver &aReceiver)
+     // what the stack is really doing.
+     if (otThreadGetDeviceRole(mInstance) == OT_DEVICE_ROLE_DISABLED)
+     {
+-        ConditionalErasePersistentInfo(aEraseDataset);
++        VerifyOrExit(ConditionalErasePersistentInfo(aEraseDataset) == OT_ERROR_NONE, error = OT_ERROR_FAILED,
++                     errorMsg = "Failed to erase persistent info");
+         ExitNow();
+     }
+ 
+-    ThreadDetachGracefully([aEraseDataset, aReceiver, this] {
+-        ConditionalErasePersistentInfo(aEraseDataset);
+-        if (aReceiver)
+-        {
+-            aReceiver(OT_ERROR_NONE, "");
+-        }
+-    });
++    UpdateThreadEnabledState(ThreadEnabledState::kStateDisabling);
++
++    ThreadDetachGracefully([aEraseDataset, aReceiver, this] { LeaveAfterDetach(aEraseDataset, aReceiver); });
+     receiveResultHere = false;
+ 
+ exit:
+@@ -806,9 +803,36 @@ void RcpHost::ThreadDetachGracefullyCallback(void)
+     }
+ }
+ 
+-void RcpHost::ConditionalErasePersistentInfo(bool aErase)
++void RcpHost::LeaveAfterDetach(bool aEraseDataset, const AsyncResultReceiver &aReceiver)
++{
++    otError     error = OT_ERROR_NONE;
++    std::string errorMsg;
++
++    // A graceful detach only takes the device to the detached role, it does not stop the
++    // stack. otInstanceErasePersistentInfo() succeeds only in the disabled role, so erasing
++    // here without disabling first fails with OT_ERROR_INVALID_STATE, and OpenThread would
++    // in any case start re-attaching with the dataset that is about to be erased.
++    SuccessOrExit(error = otThreadSetEnabled(mInstance, false), errorMsg = "Failed to disable Thread stack");
++    SuccessOrExit(error = otIp6SetEnabled(mInstance, false), errorMsg = "Failed to disable Thread interface");
++
++    UpdateThreadEnabledState(ThreadEnabledState::kStateDisabled);
++
++    SuccessOrExit(error = ConditionalErasePersistentInfo(aEraseDataset), errorMsg = "Failed to erase persistent info");
++
++exit:
++    // Leave() moved the state machine to kStateDisabling; leaving it there would answer every
++    // later call with OT_ERROR_BUSY.
++    if (mThreadEnabledState == ThreadEnabledState::kStateDisabling)
++    {
++        UpdateThreadEnabledState(ThreadEnabledState::kStateDisabled);
++    }
++
++    SafeInvoke(aReceiver, error, errorMsg);
++}
++
++otError RcpHost::ConditionalErasePersistentInfo(bool aErase)
+ {
+-    otError error;
++    otError error = OT_ERROR_NONE;
+ 
+     VerifyOrExit(aErase);
+     SuccessOrExit(error = otInstanceErasePersistentInfo(mInstance),
+@@ -820,7 +844,7 @@ void RcpHost::ConditionalErasePersistentInfo(bool aErase)
+     HandleStateChanged(OT_CHANGED_ACTIVE_DATASET | OT_CHANGED_PENDING_DATASET);
+ 
+ exit:
+-    return;
++    return error;
+ }
+ 
+ void RcpHost::DisableThreadAfterDetach(void)
+diff --git a/src/host/rcp_host.hpp b/src/host/rcp_host.hpp
+index 23a3f782..7c34d751 100644
+--- a/src/host/rcp_host.hpp
++++ b/src/host/rcp_host.hpp
+@@ -259,8 +259,9 @@ private:
+     void        ThreadDetachGracefully(const DetachGracefullyCallback &aCallback);
+     static void ThreadDetachGracefullyCallback(void *aContext);
+     void        ThreadDetachGracefullyCallback(void);
+-    void        ConditionalErasePersistentInfo(bool aErase);
++    otError     ConditionalErasePersistentInfo(bool aErase);
+     void        DisableThreadAfterDetach(void);
++    void        LeaveAfterDetach(bool aEraseDataset, const AsyncResultReceiver &aReceiver);
+     static void SendMgmtPendingSetCallback(otError aError, void *aContext);
+     void        SendMgmtPendingSetCallback(otError aError);
+ 
+diff --git a/tests/gtest/test_rcp_host_api.cpp b/tests/gtest/test_rcp_host_api.cpp
+index 60a53520..bfd644c8 100644
+--- a/tests/gtest/test_rcp_host_api.cpp
++++ b/tests/gtest/test_rcp_host_api.cpp
+@@ -254,12 +254,60 @@ TEST(RcpHostApi, StateChangesCorrectlyAfterLeave)
+                          [&host]() { return host.GetDeviceRole() != OT_DEVICE_ROLE_DETACHED; });
+     EXPECT_EQ(host.GetDeviceRole(), OT_DEVICE_ROLE_LEADER);
+     host.Leave(/* aEraseDataset */ false, receiver);
+-    MainloopProcessUntil(mainloop, /* aTimeoutSec */ 0, [&resultReceived]() { return resultReceived; });
++    MainloopProcessUntil(mainloop, /* aTimeoutSec */ 1, [&resultReceived]() { return resultReceived; });
++    EXPECT_TRUE(resultReceived); // A 0-second wait here passes vacuously: the detach needs mainloop time.
+     EXPECT_EQ(error, OT_ERROR_NONE);
++    EXPECT_EQ(host.GetDeviceRole(), OT_DEVICE_ROLE_DISABLED); // Leave disables the stack, not just detaches.
+ 
+     error = otDatasetGetActive(ot::FakePlatform::CurrentInstance(), &dataset); // Dataset should still be there.
+     EXPECT_EQ(error, OT_ERROR_NONE);
+ 
++    // 5. Call Leave with erase while attached: the stack must end up disabled, the dataset
++    // gone, and subscribers must hear about the erase as an empty dataset.
++    error                                          = OT_ERROR_NONE;
++    resultReceived                                 = false;
++    bool                     datasetChangeReceived = false;
++    otOperationalDatasetTlvs lastDatasetTlvs;
++    lastDatasetTlvs.mLength = 0xff;
++    host.GetThreadHelper()->AddActiveDatasetChangeHandler(
++        [&datasetChangeReceived, &lastDatasetTlvs](const otOperationalDatasetTlvs &aDatasetTlvs) {
++            datasetChangeReceived = true;
++            lastDatasetTlvs       = aDatasetTlvs;
++        });
++    host.SetThreadEnabled(true, nullptr);
++    MainloopProcessUntil(mainloop, /* aTimeoutSec */ 1,
++                         [&host]() { return host.GetDeviceRole() != OT_DEVICE_ROLE_DETACHED; });
++    EXPECT_EQ(host.GetDeviceRole(), OT_DEVICE_ROLE_LEADER);
++    host.Leave(/* aEraseDataset */ true, receiver);
++    MainloopProcessUntil(mainloop, /* aTimeoutSec */ 1, [&resultReceived]() { return resultReceived; });
++    EXPECT_TRUE(resultReceived);
++    EXPECT_EQ(error, OT_ERROR_NONE);
++    EXPECT_EQ(host.GetDeviceRole(), OT_DEVICE_ROLE_DISABLED);
++    error = otDatasetGetActive(ot::FakePlatform::CurrentInstance(), &dataset);
++    EXPECT_EQ(error, OT_ERROR_NOT_FOUND);
++    EXPECT_TRUE(datasetChangeReceived);
++    EXPECT_EQ(lastDatasetTlvs.mLength, 0);
++
++    // 6. Call Leave with erase when the stack was started out-of-band (ot-ctl, ubus): the
++    // state machine never saw SetThreadEnabled(), so only the device role knows Thread is
++    // running. Leave must still detach, disable and erase rather than taking the
++    // disabled-role shortcut and failing the erase.
++    error          = OT_ERROR_NONE;
++    resultReceived = false;
++    OT_UNUSED_VARIABLE(otDatasetSetActiveTlvs(ot::FakePlatform::CurrentInstance(), &datasetTlvs));
++    OT_UNUSED_VARIABLE(otIp6SetEnabled(ot::FakePlatform::CurrentInstance(), true));
++    OT_UNUSED_VARIABLE(otThreadSetEnabled(ot::FakePlatform::CurrentInstance(), true));
++    MainloopProcessUntil(mainloop, /* aTimeoutSec */ 1,
++                         [&host]() { return host.GetDeviceRole() == OT_DEVICE_ROLE_LEADER; });
++    EXPECT_EQ(host.GetDeviceRole(), OT_DEVICE_ROLE_LEADER);
++    host.Leave(/* aEraseDataset */ true, receiver);
++    MainloopProcessUntil(mainloop, /* aTimeoutSec */ 1, [&resultReceived]() { return resultReceived; });
++    EXPECT_TRUE(resultReceived);
++    EXPECT_EQ(error, OT_ERROR_NONE);
++    EXPECT_EQ(host.GetDeviceRole(), OT_DEVICE_ROLE_DISABLED);
++    error = otDatasetGetActive(ot::FakePlatform::CurrentInstance(), &dataset);
++    EXPECT_EQ(error, OT_ERROR_NOT_FOUND);
++
+     host.Deinit();
+ }
+ 
+-- 
+2.55.0
+

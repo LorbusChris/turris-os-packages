@@ -1,4 +1,4 @@
-From 6fbf032b3abe870587b86f46507f9767a3a15ddd Mon Sep 17 00:00:00 2001
+From cc43998423a36ea1f0e31870761536f71bfb0790 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Tue, 28 Jul 2026 00:26:34 +0200
 Subject: [PATCH] [host] report a dataset erase to state-change subscribers
@@ -12,8 +12,6 @@ SetActiveDatasetRequest with InvalidInState after a deprovision because
 its cached dataset said the border router was still provisioned.
 
 Dispatch the dataset-changed flags by hand when the erase succeeds.
-
-Assisted-By: Claude Opus 5
 ---
  src/host/rcp_host.cpp      | 17 +++++++++++++----
  src/host/thread_helper.cpp | 17 ++++++++++++++---

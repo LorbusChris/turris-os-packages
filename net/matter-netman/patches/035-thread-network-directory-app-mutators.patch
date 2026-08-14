@@ -1,17 +1,17 @@
-From 3aedfb42d8a2ef15a640055708b63088c72c4e2a Mon Sep 17 00:00:00 2001
+From 7f820a22b4f37d8ef6af255ac8d4e50588b479e6 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 10:30:12 +0200
 Subject: [PATCH] [thread-network-directory] let an application record and
  retract networks
 
-The cluster gives an application access to its storage and nothing else, so a
-border router recording the network it is on writes behind the cluster's back:
-subscribers to ThreadNetworks are not told, and the cluster's data version does
-not move.
+The cluster owns its storage and exposes none of it, so a border router
+cannot record the network it is on: anything written into the storage
+behind the cluster's back would not notify subscribers to ThreadNetworks
+and would not move the cluster's data version.
 
-Add AddOrUpdateNetwork and ForgetNetwork alongside the existing Storage()
-accessor. They go through the cluster, so both happen as they do for the
-cluster's own commands.
+Add AddOrUpdateNetwork and ForgetNetwork, together with accessors for the
+preferred network, on the cluster and its codegen wrapper. They go through
+the cluster, so both happen as they do for the cluster's own commands.
 
 ForgetNetwork also keeps the invariant that PreferredExtendedPanID names a
 network in the list. A preference pointing at the network being retracted
@@ -19,36 +19,22 @@ follows it to a successor when the caller supplies one, and is cleared when
 there is none.
 
 Assisted-By: Claude Opus 5
+Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
 ---
- .../CodegenIntegration.h                      | 31 +++++-
- .../ThreadNetworkDirectoryCluster.cpp         | 94 +++++++++++++++++++
- .../ThreadNetworkDirectoryCluster.h           | 31 ++++++
- .../TestThreadNetworkDirectoryCluster.cpp     | 71 ++++++++++++++
- 4 files changed, 223 insertions(+), 4 deletions(-)
+ .../CodegenIntegration.h                      |  23 ++++
+ .../ThreadNetworkDirectoryCluster.cpp         | 107 ++++++++++++++++
+ .../ThreadNetworkDirectoryCluster.h           |  31 +++++
+ .../tests/FakeThreadNetworkDirectoryStorage.h |  10 ++
+ .../TestThreadNetworkDirectoryCluster.cpp     | 116 ++++++++++++++++++
+ 5 files changed, 287 insertions(+)
 
 diff --git a/src/app/clusters/thread-network-directory-server/CodegenIntegration.h b/src/app/clusters/thread-network-directory-server/CodegenIntegration.h
-index 020da46296..a5887aa191 100644
+index 329f3d5de3..ad61038bef 100644
 --- a/src/app/clusters/thread-network-directory-server/CodegenIntegration.h
 +++ b/src/app/clusters/thread-network-directory-server/CodegenIntegration.h
-@@ -38,18 +38,41 @@ class DefaultThreadNetworkDirectoryServer
- public:
-     DefaultThreadNetworkDirectoryServer(EndpointId endpoint,
-                                         PersistentStorageDelegate & storage = Server::GetInstance().GetPersistentStorage()) :
--        mStorage(storage),
--        mCluster(endpoint, mStorage)
-+        mStorage(storage), mCluster(endpoint, mStorage)
-     {}
- 
-     ~DefaultThreadNetworkDirectoryServer();
+@@ -46,6 +46,29 @@ public:
  
      CHIP_ERROR Init();
- 
--    // Grants the application access to the underlying storage, e.g. to seed
--    // the directory with networks it knows about on its own.
-+    // Grants the application access to the underlying storage, e.g. to read
-+    // back what it recorded. Mutations go through the cluster below, so that
-+    // subscribers see them.
-     ThreadNetworkDirectoryStorage & Storage() { return mStorage; }
  
 +    // Records a network the application knows of its own accord, e.g. the
 +    // border router's own, replacing any entry with the same Extended PAN ID.
@@ -77,10 +63,10 @@ index 020da46296..a5887aa191 100644
      DefaultThreadNetworkDirectoryStorage mStorage;
      RegisteredServerCluster<ThreadNetworkDirectoryCluster> mCluster;
 diff --git a/src/app/clusters/thread-network-directory-server/ThreadNetworkDirectoryCluster.cpp b/src/app/clusters/thread-network-directory-server/ThreadNetworkDirectoryCluster.cpp
-index 234c325fb4..8364b04c97 100644
+index 234c325fb4..3f36d1e545 100644
 --- a/src/app/clusters/thread-network-directory-server/ThreadNetworkDirectoryCluster.cpp
 +++ b/src/app/clusters/thread-network-directory-server/ThreadNetworkDirectoryCluster.cpp
-@@ -278,6 +278,100 @@ exit:
+@@ -278,6 +278,113 @@ exit:
      return (status == IMStatus::Failure && err == CHIP_ERROR_NO_MEMORY) ? IMStatus::ResourceExhausted : status;
  }
  
@@ -150,12 +136,25 @@ index 234c325fb4..8364b04c97 100644
 +    // a legal state, whereas one naming a network that is gone is not.
 +    std::optional<ExtendedPanId> preferred;
 +    ReturnErrorOnFailure(GetPreferredNetwork(preferred));
-+    if (preferred.has_value() && preferred.value() == extendedPanId)
++    const bool clearedPreference = preferred.has_value() && preferred.value() == extendedPanId;
++    if (clearedPreference)
 +    {
 +        ReturnErrorOnFailure(SetPreferredNetwork(nullptr));
 +    }
 +
-+    ReturnErrorOnFailure(mStorage.RemoveNetwork(extendedPanId));
++    CHIP_ERROR err = mStorage.RemoveNetwork(extendedPanId);
++    if (err != CHIP_NO_ERROR)
++    {
++        // The network is still listed, so the preference it carried is still
++        // legal: put it back. If that write fails too, the cleared preference
++        // is the legal remnant of the double fault, and the removal error is
++        // the one worth reporting either way.
++        if (clearedPreference)
++        {
++            (void) SetPreferredNetwork(&extendedPanId);
++        }
++        return err;
++    }
 +    NotifyAttributeChanged(ThreadNetworks::Id);
 +    return CHIP_NO_ERROR;
 +}
@@ -227,11 +226,40 @@ index b13a8d9370..645f64842a 100644
      CHIP_ERROR ReadExtendedPanId(const ConcreteDataAttributePath & aPath, std::optional<ExtendedPanId> & outExPanId);
      CHIP_ERROR ReadPreferredExtendedPanId(const ConcreteDataAttributePath & aPath, AttributeValueEncoder & aEncoder);
      CHIP_ERROR ReadThreadNetworks(const ConcreteDataAttributePath & aPath, AttributeValueEncoder & aEncoder);
+diff --git a/src/app/clusters/thread-network-directory-server/tests/FakeThreadNetworkDirectoryStorage.h b/src/app/clusters/thread-network-directory-server/tests/FakeThreadNetworkDirectoryStorage.h
+index de1a055567..507e849772 100644
+--- a/src/app/clusters/thread-network-directory-server/tests/FakeThreadNetworkDirectoryStorage.h
++++ b/src/app/clusters/thread-network-directory-server/tests/FakeThreadNetworkDirectoryStorage.h
+@@ -86,6 +86,10 @@ public:
+ 
+     CHIP_ERROR RemoveNetwork(const ExtendedPanId & exPanId) override
+     {
++        if (mRejectRemove)
++        {
++            return CHIP_ERROR_PERSISTED_STORAGE_FAILED;
++        }
+         for (auto it = mNetworks.begin(); it != mNetworks.end(); ++it)
+         {
+             if (it->panId == exPanId)
+@@ -97,7 +101,13 @@ public:
+         return CHIP_ERROR_NOT_FOUND;
+     }
+ 
++    // Makes RemoveNetwork fail without touching the list, as a storage whose
++    // index write did not commit would.
++    void SetRejectRemove(bool reject) { mRejectRemove = reject; }
++
+ private:
++    bool mRejectRemove = false;
++
+     struct NetworkEntry
+     {
+         ExtendedPanId panId;
 diff --git a/src/app/clusters/thread-network-directory-server/tests/TestThreadNetworkDirectoryCluster.cpp b/src/app/clusters/thread-network-directory-server/tests/TestThreadNetworkDirectoryCluster.cpp
-index e228ea4093..69096dbf7f 100644
+index e228ea4093..6dfdf145ff 100644
 --- a/src/app/clusters/thread-network-directory-server/tests/TestThreadNetworkDirectoryCluster.cpp
 +++ b/src/app/clusters/thread-network-directory-server/tests/TestThreadNetworkDirectoryCluster.cpp
-@@ -237,6 +237,77 @@ TEST_F(TestThreadNetworkDirectoryCluster, TestPreferredExtendedPanId)
+@@ -237,6 +237,122 @@ TEST_F(TestThreadNetworkDirectoryCluster, TestPreferredExtendedPanId)
      cluster.Shutdown(ClusterShutdownType::kClusterShutdown);
  }
  
@@ -256,9 +284,36 @@ index e228ea4093..69096dbf7f 100644
 +    // An Extended PAN ID that disagrees with the dataset is refused too.
 +    EXPECT_EQ(cluster.AddOrUpdateNetwork(MakeExPanId2(), ByteSpan(kDataset1)), CHIP_ERROR_INVALID_ARGUMENT);
 +
-+    // A well-formed one is recorded.
++    // A well-formed one is recorded, and subscribers to ThreadNetworks are
++    // told about it.
 +    EXPECT_EQ(cluster.AddOrUpdateNetwork(MakeExPanId1(), ByteSpan(kDataset1)), CHIP_NO_ERROR);
 +    EXPECT_TRUE(storage.ContainsNetwork(MakeExPanId1()));
++    {
++        auto & dirty = context.ChangeListener().DirtyList();
++        ASSERT_FALSE(dirty.empty());
++        EXPECT_EQ(dirty.back(), ConcreteAttributePath(kTestEndpointId, ThreadNetworkDirectory::Id, Attributes::ThreadNetworks::Id));
++        dirty.clear();
++    }
++
++    // An update replaces the stored dataset and notifies again. The
++    // increasing Active Timestamp rule deliberately does not apply here: the
++    // application is the authority on its own network, and a re-formed
++    // network legitimately starts over, so the second update goes backwards
++    // from timestamp 2 to 1 and is still accepted.
++    for (const ByteSpan replacement : { ByteSpan(kDataset1Updated), ByteSpan(kDataset1) })
++    {
++        EXPECT_EQ(cluster.AddOrUpdateNetwork(MakeExPanId1(), replacement), CHIP_NO_ERROR);
++
++        uint8_t readBuffer[ThreadNetworkDirectoryStorage::kMaxThreadDatasetLen];
++        MutableByteSpan readBack(readBuffer);
++        EXPECT_EQ(storage.GetNetworkDataset(MakeExPanId1(), readBack), CHIP_NO_ERROR);
++        EXPECT_TRUE(readBack.data_equal(replacement));
++
++        auto & dirty = context.ChangeListener().DirtyList();
++        ASSERT_FALSE(dirty.empty());
++        EXPECT_EQ(dirty.back(), ConcreteAttributePath(kTestEndpointId, ThreadNetworkDirectory::Id, Attributes::ThreadNetworks::Id));
++        dirty.clear();
++    }
 +
 +    // A preference must name a network that is in the list.
 +    auto exPanId2 = MakeExPanId2();
@@ -269,8 +324,7 @@ index e228ea4093..69096dbf7f 100644
 +    {
 +        std::optional<ThreadNetworkDirectoryStorage::ExtendedPanId> preferred;
 +        EXPECT_EQ(cluster.GetPreferredNetwork(preferred), CHIP_NO_ERROR);
-+        ASSERT_TRUE(preferred.has_value());
-+        EXPECT_TRUE(preferred.value() == exPanId1);
++        EXPECT_TRUE(preferred == exPanId1);
 +    }
 +
 +    // Retracting a network the preference names clears the preference, so the
@@ -291,12 +345,31 @@ index e228ea4093..69096dbf7f 100644
 +    {
 +        std::optional<ThreadNetworkDirectoryStorage::ExtendedPanId> preferred;
 +        EXPECT_EQ(cluster.GetPreferredNetwork(preferred), CHIP_NO_ERROR);
-+        ASSERT_TRUE(preferred.has_value());
-+        EXPECT_TRUE(preferred.value() == exPanId1);
++        EXPECT_TRUE(preferred == exPanId1);
 +    }
 +
 +    // Clearing the preference explicitly.
 +    EXPECT_EQ(cluster.SetPreferredNetwork(nullptr), CHIP_NO_ERROR);
++    {
++        std::optional<ThreadNetworkDirectoryStorage::ExtendedPanId> preferred;
++        EXPECT_EQ(cluster.GetPreferredNetwork(preferred), CHIP_NO_ERROR);
++        EXPECT_FALSE(preferred.has_value());
++    }
++
++    // A removal that fails leaves the network listed, so the preference it
++    // carried is restored rather than silently dropped.
++    EXPECT_EQ(cluster.SetPreferredNetwork(&exPanId1), CHIP_NO_ERROR);
++    storage.SetRejectRemove(true);
++    EXPECT_EQ(cluster.ForgetNetwork(MakeExPanId1()), CHIP_ERROR_PERSISTED_STORAGE_FAILED);
++    EXPECT_TRUE(storage.ContainsNetwork(MakeExPanId1()));
++    {
++        std::optional<ThreadNetworkDirectoryStorage::ExtendedPanId> preferred;
++        EXPECT_EQ(cluster.GetPreferredNetwork(preferred), CHIP_NO_ERROR);
++        EXPECT_TRUE(preferred == exPanId1);
++    }
++    storage.SetRejectRemove(false);
++    EXPECT_EQ(cluster.ForgetNetwork(MakeExPanId1()), CHIP_NO_ERROR);
++    EXPECT_FALSE(storage.ContainsNetwork(MakeExPanId1()));
 +    {
 +        std::optional<ThreadNetworkDirectoryStorage::ExtendedPanId> preferred;
 +        EXPECT_EQ(cluster.GetPreferredNetwork(preferred), CHIP_NO_ERROR);
