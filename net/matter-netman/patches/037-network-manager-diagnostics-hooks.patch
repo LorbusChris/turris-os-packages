@@ -1,4 +1,4 @@
-From 64abeb3756031b3c1e754f4c9a72439ef372dd42 Mon Sep 17 00:00:00 2001
+From 0c9e3d8c019f1c3ebbc25c900882849989175bfe Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Thu, 30 Jul 2026 07:29:29 +0200
 Subject: [PATCH] [app][platform] add hooks for out-of-process network
@@ -24,12 +24,14 @@ uses all three in the following commits.
 
 Assisted-By: Claude Fable 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 04e1294afbc3696c9ab0fe5984263d15715d6c19)
+(cherry picked from commit 1f0ab9f904eace6f2328e8bd8a2d53899e45d629)
 ---
  .../CodegenIntegration.cpp                        | 15 +++++++++++++--
  .../ThreadNetworkDiagnosticsProvider.h            |  6 ++++++
  .../CodegenIntegration.h                          |  5 +++++
- src/platform/Linux/ConnectivityUtils.cpp          | 11 +++++++++++
- 4 files changed, 35 insertions(+), 2 deletions(-)
+ src/platform/Linux/ConnectivityUtils.cpp          | 10 ++++++++++
+ 4 files changed, 34 insertions(+), 2 deletions(-)
 
 diff --git a/src/app/clusters/thread-network-diagnostics-server/CodegenIntegration.cpp b/src/app/clusters/thread-network-diagnostics-server/CodegenIntegration.cpp
 index 7bc1aef635..e9ece74084 100644
@@ -98,18 +100,10 @@ index ad61038bef..f7dbef351c 100644
      // border router's own, replacing any entry with the same Extended PAN ID.
      CHIP_ERROR AddOrUpdateNetwork(const ThreadNetworkDirectoryStorage::ExtendedPanId & extendedPanId, ByteSpan dataset)
 diff --git a/src/platform/Linux/ConnectivityUtils.cpp b/src/platform/Linux/ConnectivityUtils.cpp
-index 635b4ecfef..1f13d1775a 100644
+index 2edb9a7e5c..785aef26d6 100644
 --- a/src/platform/Linux/ConnectivityUtils.cpp
 +++ b/src/platform/Linux/ConnectivityUtils.cpp
-@@ -26,6 +26,7 @@
- #include <arpa/inet.h>
- #include <errno.h>
- #include <ifaddrs.h>
-+#include <net/if.h>
- #include <linux/ethtool.h>
- #include <linux/if_link.h>
- #include <linux/sockios.h>
-@@ -613,6 +614,16 @@ CHIP_ERROR GetEthInterfaceName(char * ifname, size_t bufSize)
+@@ -621,6 +621,16 @@ CHIP_ERROR GetEthInterfaceName(char * ifname, size_t bufSize)
      CHIP_ERROR err          = CHIP_ERROR_READ_FAILED;
      struct ifaddrs * ifaddr = nullptr;
  
@@ -126,6 +120,3 @@ index 635b4ecfef..1f13d1775a 100644
      if (getifaddrs(&ifaddr) == -1)
      {
          ChipLogError(DeviceLayer, "Failed to get network interfaces");
--- 
-2.55.0
-

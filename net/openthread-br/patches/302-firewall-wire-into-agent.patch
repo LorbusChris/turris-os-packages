@@ -1,4 +1,4 @@
-From 165a79e9afc226a1404d69be5031d0f3d1a75f9a Mon Sep 17 00:00:00 2001
+From 6f376fd63b30070119f571c26fdf5a59c5338929 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Fri, 24 Jul 2026 15:43:44 +0200
 Subject: [PATCH] [firewall] wire the nftables backend into otbr-agent (opt-in)
@@ -17,13 +17,13 @@ cannot install its ingress filter must not silently forward unfiltered,
 matching the legacy scripts, which `die`d when the firewall/NAT services
 failed to start.
 
-Assisted-By: Claude Fable 5
+(cherry picked from commit f903d04020844fd0d68feb931c9718142183bdcd)
 ---
- src/agent/CMakeLists.txt              |  1 +
- src/agent/application.cpp             | 92 +++++++++++++++++++++++++++
- src/agent/application.hpp             | 12 ++++
- third_party/openthread/CMakeLists.txt |  9 ++-
- 4 files changed, 113 insertions(+), 1 deletion(-)
+ src/agent/CMakeLists.txt              |   1 +
+ src/agent/application.cpp             | 113 ++++++++++++++++++++++++++
+ src/agent/application.hpp             |  12 +++
+ third_party/openthread/CMakeLists.txt |   9 +-
+ 4 files changed, 134 insertions(+), 1 deletion(-)
 
 diff --git a/src/agent/CMakeLists.txt b/src/agent/CMakeLists.txt
 index 7be20f0a..801a2a12 100644
@@ -38,14 +38,21 @@ index 7be20f0a..801a2a12 100644
      $<$<BOOL:${OTBR_MDNS}>:otbr-mdns>
      $<$<BOOL:${OTBR_OPENWRT}>:otbr-ubus>
 diff --git a/src/agent/application.cpp b/src/agent/application.cpp
-index 806f0a1e..908aef68 100644
+index bbd84195..6ff9ee98 100644
 --- a/src/agent/application.cpp
 +++ b/src/agent/application.cpp
-@@ -43,6 +43,14 @@
+@@ -38,11 +38,21 @@
+ #endif
+ 
+ #include "agent/application.hpp"
++
+ #include "common/code_utils.hpp"
+ #include "common/mainloop_manager.hpp"
  #include "host/posix/dnssd.hpp"
  #include "utils/infra_link_selector.hpp"
  
 +#if OTBR_ENABLE_NFTABLES
++#include <algorithm>
 +#include <string.h>
 +#include <vector>
 +
@@ -56,7 +63,7 @@ index 806f0a1e..908aef68 100644
  namespace otbr {
  
  #ifndef OTBR_MAINLOOP_POLL_TIMEOUT_SEC
-@@ -229,6 +237,10 @@ void Application::HandleSignal(int aSignal)
+@@ -228,6 +238,10 @@ void Application::HandleSignal(int aSignal)
  void Application::CreateRcpMode(void)
  {
      otbr::Host::RcpHost &rcpHost = static_cast<otbr::Host::RcpHost &>(mHost);
@@ -67,7 +74,7 @@ index 806f0a1e..908aef68 100644
  #if OTBR_ENABLE_BACKBONE_ROUTER
      mBackboneAgent = MakeUnique<BackboneRouter::BackboneAgent>(rcpHost);
  #endif
-@@ -318,6 +330,29 @@ void Application::InitRcpMode(const std::string &aRestListenAddress, int aRestLi
+@@ -317,6 +331,31 @@ void Application::InitRcpMode(const std::string &aRestListenAddress, int aRestLi
      });
  #endif
  #endif // OTBR_ENABLE_BORDER_AGENT
@@ -87,7 +94,9 @@ index 806f0a1e..908aef68 100644
 +    // them in sync as it changes. This is the in-process replacement for the
 +    // OpenThread posix platform firewall's ipset producer.
 +    rcpHost.AddThreadStateChangedCallback([this](otChangedFlags aFlags) {
-+        if (aFlags & OT_CHANGED_THREAD_NETDATA)
++        // Network data carries the on-mesh prefixes; the active dataset carries
++        // the mesh-local prefix, which the deny set also covers.
++        if (aFlags & (OT_CHANGED_THREAD_NETDATA | OT_CHANGED_ACTIVE_DATASET))
 +        {
 +            UpdateIngressPrefixes();
 +        }
@@ -97,7 +106,7 @@ index 806f0a1e..908aef68 100644
  #if OTBR_ENABLE_BACKBONE_ROUTER
      mBackboneAgent->Init();
  #endif
-@@ -341,8 +376,65 @@ void Application::InitRcpMode(const std::string &aRestListenAddress, int aRestLi
+@@ -340,8 +379,82 @@ void Application::InitRcpMode(const std::string &aRestListenAddress, int aRestLi
  #endif
  }
  
@@ -111,6 +120,17 @@ index 806f0a1e..908aef68 100644
 +    std::vector<Ip6Prefix>   allowDst;
 +    otInstance              *instance;
 +
++    // Several border routers can advertise the same on-mesh prefix, and duplicate
++    // intervals in a single transaction make the kernel reject the whole batch,
++    // so only distinct prefixes go in. (Declared before the first VerifyOrExit so
++    // no goto crosses its initialisation.)
++    auto addUnique = [](std::vector<Ip6Prefix> &aVec, const Ip6Prefix &aPrefix) {
++        if (std::find(aVec.begin(), aVec.end(), aPrefix) == aVec.end())
++        {
++            aVec.push_back(aPrefix);
++        }
++    };
++
 +    // The firewall only exists in RCP mode, so check it before downcasting mHost.
 +    VerifyOrExit(mFirewall != nullptr && mFirewall->IsIngressFilterEnabled());
 +
@@ -122,8 +142,8 @@ index 806f0a1e..908aef68 100644
 +    {
 +        Ip6Prefix prefix;
 +        prefix.Set(config.mPrefix);
-+        denySrc.push_back(prefix);
-+        allowDst.push_back(prefix);
++        addUnique(denySrc, prefix);
++        addUnique(allowDst, prefix);
 +    }
 +
 +    // Deny-src additionally covers the mesh-local /64.
@@ -133,7 +153,7 @@ index 806f0a1e..908aef68 100644
 +        Ip6Prefix mlPrefix{};
 +        memcpy(mlPrefix.mPrefix.m8, meshLocal->m8, sizeof(meshLocal->m8));
 +        mlPrefix.mLength = 64;
-+        denySrc.push_back(mlPrefix);
++        addUnique(denySrc, mlPrefix);
 +    }
 +
 +    if (mFirewall->ReplaceIngressPrefixes(denySrc, allowDst) != OTBR_ERROR_NONE)
@@ -158,6 +178,12 @@ index 806f0a1e..908aef68 100644
 +        {
 +            otbrLogWarning("FirewallManager: teardown failed (%d)", firewallError);
 +        }
++    }
++    // Close the netlink socket too, or a later InitRcpMode() dies in
++    // mNftables->Init() on the still-open socket.
++    if (mNftables != nullptr)
++    {
++        mNftables->Deinit();
 +    }
 +#endif
  #if OTBR_ENABLE_DNSSD_PLAT
@@ -220,6 +246,3 @@ index bc327afd..99679bb1 100644
  set(OT_HISTORY_TRACKER ON CACHE STRING "enable history tracker" FORCE)
  set(OT_JOINER ON CACHE STRING "enable joiner" FORCE)
  set(OT_LINK_METRICS_INITIATOR ${OTBR_LINK_METRICS_TELEMETRY} CACHE STRING "enable link metrics initiator" FORCE)
--- 
-2.55.0
-

@@ -1,4 +1,4 @@
-From 07c0c134835d80e75dfd93fa5767b91b90f060eb Mon Sep 17 00:00:00 2001
+From bf8bcceafcbc3430edcad250483dad90ba04a7f3 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Thu, 30 Jul 2026 07:29:29 +0200
 Subject: [PATCH] [network-manager] serve the full NIM cluster set from OpenWrt
@@ -38,10 +38,16 @@ provides the counters and PHY data.
 
 Assisted-By: Claude Fable 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit c4eb48708e8161e4b090973b6065e31be5969ab1)
+(cherry picked from commit 4aa0176aa4eb2211e72a75e1f2b056b30b7aa4b0)
 ---
- examples/network-manager-app/linux/BUILD.gn   |   6 +
+ examples/network-manager-app/linux/BUILD.gn   |  10 +-
  .../linux/MatterUbusService.cpp               | 171 +++++++++
  .../linux/MatterUbusService.h                 |  18 +
+ .../network-manager-app/linux/NimBackend.h    |  46 ++-
+ .../linux/NimBackendFake.cpp                  |  10 +-
+ .../linux/NimBackendUbus.cpp                  |  89 ++++-
+ .../linux/NimBackendUbus.h                    |  25 +-
  .../linux/NimDiagnostics.cpp                  | 209 +++++++++++
  .../linux/NimDiagnostics.h                    |  71 ++++
  .../linux/NimInstanceInfo.cpp                 | 180 +++++++++
@@ -54,10 +60,10 @@ Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
  .../network-manager-app/linux/UboxUtils.h     |  10 +-
  .../linux/WiFiCredentialsUbus.cpp             | 251 +++++++++++++
  .../linux/WiFiCredentialsUbus.h               |  70 ++++
- examples/network-manager-app/linux/main.cpp   | 225 +++++++++++-
+ examples/network-manager-app/linux/main.cpp   | 192 +++++++++-
  .../network-manager-app.matter                |  57 +++
  .../network-manager-app.zap                   | 198 +++++++++-
- 18 files changed, 1957 insertions(+), 8 deletions(-)
+ 22 files changed, 2083 insertions(+), 23 deletions(-)
  create mode 100644 examples/network-manager-app/linux/NimDiagnostics.cpp
  create mode 100644 examples/network-manager-app/linux/NimDiagnostics.h
  create mode 100644 examples/network-manager-app/linux/NimInstanceInfo.cpp
@@ -68,16 +74,31 @@ Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
  create mode 100644 examples/network-manager-app/linux/WiFiCredentialsUbus.h
 
 diff --git a/examples/network-manager-app/linux/BUILD.gn b/examples/network-manager-app/linux/BUILD.gn
-index 580f03f830..5d854c9dc7 100644
+index 3374286b14..f26fac2415 100644
 --- a/examples/network-manager-app/linux/BUILD.gn
 +++ b/examples/network-manager-app/linux/BUILD.gn
-@@ -40,15 +40,21 @@ executable("matter-network-manager-app") {
-     defines += [ "MATTER_ENABLE_UBUS=1" ]
-     sources += [
-       "MatterUbusService.cpp",
-+      "NimDiagnostics.cpp",
-+      "NimInstanceInfo.cpp",
-       "MatterUbusService.h",
+@@ -19,7 +19,7 @@ declare_args() {
+   # The operating system this network manager is built for:
+   #   "fake"  no OS integration: demo Wi-Fi credentials and an in-memory
+   #           Thread border router, for standalone testing
+-  #   "ubus"  OpenWrt: otbr-agent and procd over ubus
++  #   "ubus"  OpenWrt: netifd, otbr-agent and procd over ubus
+   #   "dbus"  NetworkManager and otbr-agent over D-Bus (not implemented yet)
+   matter_nim_backend = "fake"
+ 
+@@ -38,6 +38,10 @@ assert(nim_backend == "fake" || nim_backend == "ubus",
+ executable("matter-network-manager-app") {
+   sources = [
+     "NimBackend.h",
++    "NimDiagnostics.cpp",
++    "NimDiagnostics.h",
++    "NimInstanceInfo.cpp",
++    "NimInstanceInfo.h",
+     "include/CHIPProjectAppConfig.h",
+     "main.cpp",
+   ]
+@@ -60,12 +64,16 @@ executable("matter-network-manager-app") {
+       "NimBackendUbus.h",
        "ThreadBROpenThreadUbus.cpp",
        "ThreadBROpenThreadUbus.h",
 +      "ThreadDiagnosticsUbus.cpp",
@@ -349,6 +370,305 @@ index 165ff5906d..8523ede5d1 100644
  private:
      ubus::UbusManager & mUbusManager;
  };
+diff --git a/examples/network-manager-app/linux/NimBackend.h b/examples/network-manager-app/linux/NimBackend.h
+index e8cb29631f..2afaa04cce 100644
+--- a/examples/network-manager-app/linux/NimBackend.h
++++ b/examples/network-manager-app/linux/NimBackend.h
+@@ -20,10 +20,13 @@
+ 
+ #include <app/clusters/thread-border-router-management-server/thread-br-delegate.h>
+ #include <lib/core/CHIPError.h>
++#include <lib/support/CHIPArgParser.hpp>
++#include <lib/support/ThreadOperationalDataset.h>
+ 
+ namespace chip {
+ 
+ namespace app {
++class ThreadNetworkDirectoryStorage;
+ namespace Clusters {
+ class WiFiNetworkManagementCluster;
+ } // namespace Clusters
+@@ -33,21 +36,39 @@ class WiFiNetworkManagementCluster;
+ //
+ // A Network Infrastructure Manager does not join networks, it serves them: the
+ // access point credentials the Wi-Fi Network Management cluster hands out, the
+-// border router behind Thread Border Router Management, and a control surface
+-// the OS uses to open the commissioning window. Where those come from differs
+-// per OS -- otbr-agent and procd over ubus on OpenWrt; NetworkManager and
+-// otbr-agent over D-Bus elsewhere -- while the clusters and everything that
+-// reads the cluster state are the same everywhere. This interface is the seam
+-// between the two: main.cpp only knows this class, and the build selects one
+-// implementation of it.
++// border router behind Thread Border Router Management and Thread Network
++// Diagnostics, and a control surface the OS uses to open the commissioning
++// window. Where those come from differs per OS -- netifd, otbr-agent and procd
++// over ubus on OpenWrt; NetworkManager and otbr-agent over D-Bus elsewhere --
++// while everything that reads sysfs, os-release or the cluster state is the
++// same everywhere. This interface is the seam between the two; main.cpp only
++// knows this class, and the build selects one implementation of it.
++//
++// Option identifiers a backend hands out start at kFirstOptionId; the
++// identifiers below it belong to main.cpp.
+ class NimBackend
+ {
+ public:
++    using ActiveDatasetObserver = void (*)(void * context, const Thread::OperationalDataset & dataset);
++
++    static constexpr int kFirstOptionId = 0x1100;
++
+     virtual ~NimBackend() = default;
+ 
+     // A human-readable name, for the startup log.
+     virtual const char * Name() const = 0;
+ 
++    // Command-line options this backend adds, terminated by an empty entry,
++    // and the help text describing them; either may be null.
++    virtual const ArgParser::OptionDef * OptionDefs() const { return nullptr; }
++    virtual const char * OptionHelp() const { return nullptr; }
++    virtual bool HandleOption(int identifier, const char * value) { return false; }
++
++    // The interface this node is reachable on when the command line does not
++    // say, or null when the platform default is to be kept. This decides
++    // which interface the Ethernet diagnostics describe.
++    virtual const char * DefaultPrimaryInterface() const { return nullptr; }
++
+     // Before the Matter stack initialises, once the command line is parsed.
+     // Transport connections and providers the stack consults during its own
+     // initialisation belong here.
+@@ -58,14 +79,21 @@ public:
+     // makes.
+     virtual app::Clusters::ThreadBorderRouterManagement::Delegate & BorderRouterDelegate() = 0;
+ 
++    // Reports the border router's active dataset whenever the backend learns
++    // it, including the empty dataset that means there is none. A backend
++    // that already knows it replays it at once.
++    virtual void SetActiveDatasetObserver(ActiveDatasetObserver observer, void * context) = 0;
++
+     // Feeds the cluster with the access point credentials this node shares,
+     // now and whenever they change. Returns CHIP_ERROR_NOT_IMPLEMENTED if this
+     // backend has nothing to share; the cluster then holds no credentials.
+     virtual CHIP_ERROR StartWiFiCredentialSharing(app::Clusters::WiFiNetworkManagementCluster & cluster) = 0;
+ 
+     // After every cluster is up: publish the OS-facing control surface, if
+-    // any.
+-    virtual CHIP_ERROR Start() = 0;
++    // any. The sources are what the node currently shares; the directory is
++    // null when this node manages no Thread network.
++    virtual CHIP_ERROR Start(app::Clusters::WiFiNetworkManagementCluster * wifi,
++                             app::ThreadNetworkDirectoryStorage * threadDirectory) = 0;
+ 
+     virtual void Shutdown() = 0;
+ };
+diff --git a/examples/network-manager-app/linux/NimBackendFake.cpp b/examples/network-manager-app/linux/NimBackendFake.cpp
+index a048935c63..3f716040fe 100644
+--- a/examples/network-manager-app/linux/NimBackendFake.cpp
++++ b/examples/network-manager-app/linux/NimBackendFake.cpp
+@@ -47,13 +47,21 @@ public:
+         return *mDelegate;
+     }
+ 
++    // The fake delegate never reports a dataset of its own: there is no
++    // border router whose network could be recorded in the directory.
++    void SetActiveDatasetObserver(ActiveDatasetObserver observer, void * context) override {}
++
+     CHIP_ERROR StartWiFiCredentialSharing(app::Clusters::WiFiNetworkManagementCluster & cluster) override
+     {
+         return cluster.SetNetworkCredentials(ByteSpan::fromCharSpan("MatterAP"_span),
+                                              ByteSpan::fromCharSpan("Setec Astronomy"_span));
+     }
+ 
+-    CHIP_ERROR Start() override { return CHIP_NO_ERROR; }
++    CHIP_ERROR Start(app::Clusters::WiFiNetworkManagementCluster * wifi,
++                     app::ThreadNetworkDirectoryStorage * threadDirectory) override
++    {
++        return CHIP_NO_ERROR;
++    }
+ 
+     void Shutdown() override {}
+ 
+diff --git a/examples/network-manager-app/linux/NimBackendUbus.cpp b/examples/network-manager-app/linux/NimBackendUbus.cpp
+index 72efde7eb1..ceb36e8310 100644
+--- a/examples/network-manager-app/linux/NimBackendUbus.cpp
++++ b/examples/network-manager-app/linux/NimBackendUbus.cpp
+@@ -18,12 +18,34 @@
+ 
+ #include "NimBackendUbus.h"
+ 
++#include <app/clusters/thread-network-diagnostics-server/ThreadNetworkDiagnosticsProvider.h>
+ #include <lib/support/CodeUtils.h>
++#include <lib/support/logging/CHIPLogging.h>
+ 
+ namespace chip {
+ 
+ namespace {
+ 
++constexpr int kOptionWifiNetwork = NimBackend::kFirstOptionId + 0;
++constexpr int kOptionWifiIface   = NimBackend::kFirstOptionId + 1;
++constexpr int kOptionNoWifiShare = NimBackend::kFirstOptionId + 2;
++
++const ArgParser::OptionDef sOptionDefs[] = {
++    { "wifi-network", ArgParser::kArgumentRequired, kOptionWifiNetwork },
++    { "wifi-iface", ArgParser::kArgumentRequired, kOptionWifiIface },
++    { "no-wifi-share", ArgParser::kNoArgument, kOptionNoWifiShare },
++    {},
++};
++
++const char sOptionHelp[] = "  --wifi-network <name>\n"
++                           "       Share the Wi-Fi credentials of the access point attached to this\n"
++                           "       netifd network (default: lan).\n"
++                           "  --wifi-iface <section>\n"
++                           "       Share the Wi-Fi credentials of this uci wifi-iface section,\n"
++                           "       overriding the automatic selection.\n"
++                           "  --no-wifi-share\n"
++                           "       Do not share any Wi-Fi credentials.\n";
++
+ UbusNimBackend sBackend;
+ 
+ } // namespace
+@@ -33,9 +55,46 @@ NimBackend & GetNimBackend()
+     return sBackend;
+ }
+ 
++const ArgParser::OptionDef * UbusNimBackend::OptionDefs() const
++{
++    return sOptionDefs;
++}
++
++const char * UbusNimBackend::OptionHelp() const
++{
++    return sOptionHelp;
++}
++
++bool UbusNimBackend::HandleOption(int identifier, const char * value)
++{
++    switch (identifier)
++    {
++    case kOptionWifiNetwork:
++        mWifiNetworkName = value;
++        return true;
++    case kOptionWifiIface:
++        mWifiIfaceSection = value;
++        return true;
++    case kOptionNoWifiShare:
++        mWifiNetworkName  = nullptr;
++        mWifiIfaceSection = nullptr;
++        return true;
++    default:
++        return false;
++    }
++}
++
+ CHIP_ERROR UbusNimBackend::EarlyInit()
+ {
+-    return mUbusManager.Init();
++    ReturnErrorOnFailure(mUbusManager.Init());
++
++    // Must be in place before endpoint initialization constructs the
++    // Thread Network Diagnostics cluster: without an in-process Thread
++    // stack, the default provider would report an unprovisioned device.
++    mThreadDiagnostics.emplace(mUbusManager);
++    ReturnErrorOnFailure(mThreadDiagnostics->Init());
++    app::Clusters::ThreadNetworkDiagnostics::SetDefaultThreadNetworkDiagnosticsProvider(&*mThreadDiagnostics);
++    return CHIP_NO_ERROR;
+ }
+ 
+ app::Clusters::ThreadBorderRouterManagement::Delegate & UbusNimBackend::BorderRouterDelegate()
+@@ -47,14 +106,36 @@ app::Clusters::ThreadBorderRouterManagement::Delegate & UbusNimBackend::BorderRo
+     return *mBorderRouterDelegate;
+ }
+ 
++void UbusNimBackend::SetActiveDatasetObserver(ActiveDatasetObserver observer, void * context)
++{
++    BorderRouterDelegate();
++    mBorderRouterDelegate->SetActiveDatasetObserver(observer, context);
++}
++
+ CHIP_ERROR UbusNimBackend::StartWiFiCredentialSharing(app::Clusters::WiFiNetworkManagementCluster & cluster)
+ {
+-    // Nothing reads the router's access point configuration yet.
+-    return CHIP_ERROR_NOT_IMPLEMENTED;
++    // The cluster serves the router's real access point credentials, kept in
++    // sync from netifd; procd pokes reload_wifi on wireless config changes.
++    // An empty network name with no override disables sharing entirely.
++    const bool share = (mWifiNetworkName != nullptr && mWifiNetworkName[0] != '\0') || mWifiIfaceSection != nullptr;
++    VerifyOrReturnError(share, CHIP_ERROR_NOT_IMPLEMENTED);
++
++    ChipLogProgress(AppServer, "Wi-Fi credential source: network '%s', iface override '%s'", mWifiNetworkName,
++                    mWifiIfaceSection != nullptr ? mWifiIfaceSection : "(none)");
++    mWiFiCredentials.emplace(mUbusManager, cluster);
++    ReturnErrorOnFailure(mWiFiCredentials->Init(mWifiNetworkName, mWifiIfaceSection));
++    mService.SetReloadWifiHandler([](void * context) { static_cast<WiFiCredentialsUbusProvider *>(context)->Refresh(); },
++                                  &*mWiFiCredentials);
++    return CHIP_NO_ERROR;
+ }
+ 
+-CHIP_ERROR UbusNimBackend::Start()
++CHIP_ERROR UbusNimBackend::Start(app::Clusters::WiFiNetworkManagementCluster * wifi,
++                                 app::ThreadNetworkDirectoryStorage * threadDirectory)
+ {
++    // Status sources for the ubus object: what the node currently shares.
++    mService.SetWiFiCluster(wifi);
++    mService.SetThreadDirectory(threadDirectory);
++
+     // Publish the "matter" ubus object once the server is up; its handlers
+     // read commissioning state owned by the server.
+     return mService.Init();
+diff --git a/examples/network-manager-app/linux/NimBackendUbus.h b/examples/network-manager-app/linux/NimBackendUbus.h
+index 0424ad34bb..a300873f69 100644
+--- a/examples/network-manager-app/linux/NimBackendUbus.h
++++ b/examples/network-manager-app/linux/NimBackendUbus.h
+@@ -21,29 +21,48 @@
+ #include "MatterUbusService.h"
+ #include "NimBackend.h"
+ #include "ThreadBROpenThreadUbus.h"
++#include "ThreadDiagnosticsUbus.h"
+ #include "UbusManager.h"
++#include "WiFiCredentialsUbus.h"
+ 
+ #include <optional>
+ 
+ namespace chip {
+ 
+-// OpenWrt: otbr-agent for Thread and a "matter" ubus object for the router's
+-// own UI, over ubus.
++// OpenWrt: netifd for the access point credentials, otbr-agent for Thread,
++// and a "matter" ubus object for the router's own UI, all over ubus.
+ class UbusNimBackend final : public NimBackend
+ {
+ public:
+     const char * Name() const override { return "OpenWrt (ubus)"; }
+ 
++    const ArgParser::OptionDef * OptionDefs() const override;
++    const char * OptionHelp() const override;
++    bool HandleOption(int identifier, const char * value) override;
++
++    // The LAN bridge: where Matter devices live on an OpenWrt router.
++    const char * DefaultPrimaryInterface() const override { return "br-lan"; }
++
+     CHIP_ERROR EarlyInit() override;
+     app::Clusters::ThreadBorderRouterManagement::Delegate & BorderRouterDelegate() override;
++    void SetActiveDatasetObserver(ActiveDatasetObserver observer, void * context) override;
+     CHIP_ERROR StartWiFiCredentialSharing(app::Clusters::WiFiNetworkManagementCluster & cluster) override;
+-    CHIP_ERROR Start() override;
++    CHIP_ERROR Start(app::Clusters::WiFiNetworkManagementCluster * wifi,
++                     app::ThreadNetworkDirectoryStorage * threadDirectory) override;
+     void Shutdown() override;
+ 
+ private:
+     ubus::UbusManager mUbusManager{};
+     MatterUbusService mService{ mUbusManager };
+     std::optional<OpenThreadUbusBorderRouterDelegate> mBorderRouterDelegate;
++    std::optional<OtbrThreadNetworkDiagnosticsProvider> mThreadDiagnostics;
++    std::optional<WiFiCredentialsUbusProvider> mWiFiCredentials;
++
++    // The netifd network whose access point credentials are shared, and an
++    // optional wifi-iface section overriding the automatic selection. Both
++    // null means nothing is shared.
++    const char * mWifiNetworkName  = "lan";
++    const char * mWifiIfaceSection = nullptr;
+ };
+ 
+ } // namespace chip
 diff --git a/examples/network-manager-app/linux/NimDiagnostics.cpp b/examples/network-manager-app/linux/NimDiagnostics.cpp
 new file mode 100644
 index 0000000000..17ab810589
@@ -1750,67 +2070,49 @@ index 0000000000..026aaf5c76
 +
 +} // namespace chip
 diff --git a/examples/network-manager-app/linux/main.cpp b/examples/network-manager-app/linux/main.cpp
-index 5b3e2c0d08..e7170d0f88 100644
+index cf831a7a46..7ba5bfbacd 100644
 --- a/examples/network-manager-app/linux/main.cpp
 +++ b/examples/network-manager-app/linux/main.cpp
-@@ -31,8 +31,12 @@
+@@ -29,8 +29,12 @@
+ #include <lib/support/Span.h>
  
- #if MATTER_ENABLE_UBUS
- #include "MatterUbusService.h"
+ #include "NimBackend.h"
 +#include "NimDiagnostics.h"
 +#include "NimInstanceInfo.h"
- #include "ThreadBROpenThreadUbus.h"
-+#include "ThreadDiagnosticsUbus.h"
- #include "UbusManager.h"
-+#include "WiFiCredentialsUbus.h"
- #else
- #include "ThreadBRFake.h"
- #endif
-@@ -51,6 +55,97 @@ ByteSpan ByteSpanFromCharSpan(CharSpan span)
- #if MATTER_ENABLE_UBUS
- ubus::UbusManager gUbusManager{};
- MatterUbusService gMatterUbusService{ gUbusManager };
-+std::optional<WiFiCredentialsUbusProvider> gWiFiCredentialsProvider;
-+
-+// The netifd network whose access point credentials the Wi-Fi Network
-+// Management cluster shares, and an optional wifi-iface section override.
-+const char * gWifiNetworkName  = "lan";
-+const char * gWifiIfaceSection = nullptr;
-+bool gThreadManaged            = true;
+ 
++#include <cstring>
+ #include <optional>
++#include <string>
+ 
+ using namespace chip;
+ using namespace chip::app;
+@@ -39,6 +43,99 @@ using namespace chip::app::Clusters;
+ // Everything in this file is the same for every operating system the
+ // network manager runs on; what differs lives behind NimBackend.
+ 
++bool gThreadManaged = true;
 +
 +// The interface this node is reachable on; drives the diagnostics report
-+// and the identity the ethernet layers pick on this multi-homed host.
-+const char * gPrimaryInterface = "br-lan";
++// and the identity the ethernet layers pick on this multi-homed host. Null
++// until the command line or the backend says.
++const char * gPrimaryInterface = nullptr;
 +
-+constexpr uint16_t kOptionWifiNetwork = 0x1001;
-+constexpr uint16_t kOptionWifiIface   = 0x1002;
-+constexpr uint16_t kOptionNoWifiShare = 0x1003;
-+constexpr uint16_t kOptionNoThread    = 0x1004;
-+constexpr uint16_t kOptionPrimaryIface = 0x1005;
-+constexpr uint16_t kOptionVendorName   = 0x1006;
-+constexpr uint16_t kOptionDiagIface    = 0x1007;
-+constexpr uint16_t kOptionNoEthDiag    = 0x1008;
++constexpr int kOptionNoThread     = 0x1001;
++constexpr int kOptionPrimaryIface = 0x1002;
++constexpr int kOptionVendorName   = 0x1003;
++constexpr int kOptionDiagIface    = 0x1004;
++constexpr int kOptionNoEthDiag    = 0x1005;
++static_assert(kOptionNoEthDiag < NimBackend::kFirstOptionId, "option identifiers collide with the backend's");
 +
 +bool HandleAppOption(const char * program, ArgParser::OptionSet * options, int identifier, const char * name, const char * value)
 +{
 +    switch (identifier)
 +    {
-+    case kOptionWifiNetwork:
-+        gWifiNetworkName = value;
-+        return true;
-+    case kOptionWifiIface:
-+        gWifiIfaceSection = value;
-+        return true;
-+    case kOptionNoWifiShare:
-+        gWifiNetworkName  = nullptr;
-+        gWifiIfaceSection = nullptr;
-+        return true;
 +    case kOptionNoThread:
 +        gThreadManaged = false;
 +        return true;
 +    case kOptionPrimaryIface:
 +        gPrimaryInterface = value;
-+        setenv("CHIP_ETHERNET_INTERFACE", value, 1);
 +        return true;
 +    case kOptionVendorName:
 +        NimInstanceInfoProvider::Instance().SetVendorName(value);
@@ -1822,14 +2124,11 @@ index 5b3e2c0d08..e7170d0f88 100644
 +        NimDiagnosticsProvider::Instance().SetEthernetDiagnosticsEnabled(false);
 +        return true;
 +    default:
-+        return false;
++        return GetNimBackend().HandleOption(identifier, value);
 +    }
 +}
 +
-+ArgParser::OptionDef sAppOptionDefs[] = {
-+    { "wifi-network", ArgParser::kArgumentRequired, kOptionWifiNetwork },
-+    { "wifi-iface", ArgParser::kArgumentRequired, kOptionWifiIface },
-+    { "no-wifi-share", ArgParser::kNoArgument, kOptionNoWifiShare },
++const ArgParser::OptionDef sCommonOptionDefs[] = {
 +    { "no-thread", ArgParser::kNoArgument, kOptionNoThread },
 +    { "primary-interface", ArgParser::kArgumentRequired, kOptionPrimaryIface },
 +    { "vendor-name", ArgParser::kArgumentRequired, kOptionVendorName },
@@ -1838,87 +2137,73 @@ index 5b3e2c0d08..e7170d0f88 100644
 +    {},
 +};
 +
-+const char sAppOptionHelp[] = "  --wifi-network <name>\n"
-+                              "       Share the Wi-Fi credentials of the access point attached to this\n"
-+                              "       netifd network (default: lan).\n"
-+                              "  --wifi-iface <section>\n"
-+                              "       Share the Wi-Fi credentials of this uci wifi-iface section,\n"
-+                              "       overriding the automatic selection.\n"
-+                              "  --no-wifi-share\n"
-+                              "       Do not share any Wi-Fi credentials.\n"
-+                              "  --no-thread\n"
-+                              "       No Thread border router is present: do not record or share\n"
-+                              "       any Thread networks.\n"
-+                              "  --primary-interface <name>\n"
-+                              "       The interface this node is reachable on (default: br-lan).\n"
-+                              "  --vendor-name <name>\n"
-+                              "       Manufacturer reported in Basic Information, overriding the\n"
-+                              "       one the firmware states in /etc/os-release.\n"
-+                              "  --diagnostics-interface <name>\n"
-+                              "       Feed the Ethernet diagnostics from this interface instead of\n"
-+                              "       the primary one.\n"
-+                              "  --no-ethernet-diagnostics\n"
-+                              "       Report no Ethernet diagnostics at all.\n";
++const char sCommonOptionHelp[] = "  --no-thread\n"
++                                 "       No Thread border router is present: do not record or share\n"
++                                 "       any Thread networks.\n"
++                                 "  --primary-interface <name>\n"
++                                 "       The interface this node is reachable on.\n"
++                                 "  --vendor-name <name>\n"
++                                 "       Manufacturer reported in Basic Information, overriding the\n"
++                                 "       one the firmware states in /etc/os-release.\n"
++                                 "  --diagnostics-interface <name>\n"
++                                 "       Feed the Ethernet diagnostics from this interface instead of\n"
++                                 "       the primary one.\n"
++                                 "  --no-ethernet-diagnostics\n"
++                                 "       Report no Ethernet diagnostics at all.\n";
 +
-+ArgParser::OptionSet sAppOptions = { HandleAppOption, sAppOptionDefs, "APP OPTIONS", sAppOptionHelp };
- #endif
- 
++// The option table handed to the argument parser: the common options followed
++// by whatever the backend adds. One table, because the parser takes one.
++constexpr size_t kMaxOptionDefs = 32;
++ArgParser::OptionDef sOptionDefs[kMaxOptionDefs];
++std::string sOptionHelp;
++ArgParser::OptionSet sAppOptions = { HandleAppOption, sOptionDefs, "APP OPTIONS", nullptr };
++
++void AssembleOptions()
++{
++    size_t count = 0;
++    for (const ArgParser::OptionDef * def = sCommonOptionDefs; def->Name != nullptr; def++)
++    {
++        sOptionDefs[count++] = *def;
++    }
++    if (const ArgParser::OptionDef * defs = GetNimBackend().OptionDefs())
++    {
++        for (const ArgParser::OptionDef * def = defs; def->Name != nullptr; def++)
++        {
++            VerifyOrDie(count < kMaxOptionDefs - 1);
++            sOptionDefs[count++] = *def;
++        }
++    }
++    sOptionDefs[count] = {};
++
++    sOptionHelp = sCommonOptionHelp;
++    if (const char * help = GetNimBackend().OptionHelp())
++    {
++        sOptionHelp += help;
++    }
++    sAppOptions.OptionHelp = sOptionHelp.c_str();
++}
++
  std::optional<DefaultThreadNetworkDirectoryServer> gThreadNetworkDirectoryServer;
-@@ -67,17 +162,23 @@ void emberAfWiFiNetworkManagementClusterInitCallback(EndpointId endpoint)
-     TEMPORARY_RETURN_IGNORED gWiFiNetworkManagementServer.emplace(endpoint).Init();
- }
  
-+#if MATTER_ENABLE_UBUS
-+std::optional<OpenThreadUbusBorderRouterDelegate> gBorderRouterDelegate;
-+#else
-+std::optional<FakeBorderRouterDelegate> gBorderRouterDelegate;
-+#endif
-+
- std::optional<ThreadBorderRouterManagement::ServerInstance> gThreadBorderRouterManagementServer;
- void emberAfThreadBorderRouterManagementClusterInitCallback(EndpointId endpoint)
- {
-     VerifyOrDie(!gThreadBorderRouterManagementServer);
- #if MATTER_ENABLE_UBUS
--    static OpenThreadUbusBorderRouterDelegate delegate{ gUbusManager };
-+    gBorderRouterDelegate.emplace(gUbusManager);
- #else
--    static FakeBorderRouterDelegate delegate{};
-+    gBorderRouterDelegate.emplace();
- #endif
-     TEMPORARY_RETURN_IGNORED gThreadBorderRouterManagementServer
--        .emplace(endpoint, &delegate, Server::GetInstance().GetFailSafeContext())
-+        .emplace(endpoint, &*gBorderRouterDelegate, Server::GetInstance().GetFailSafeContext())
-         .Init();
- }
+ void emberAfThreadNetworkDirectoryClusterInitCallback(EndpointId endpoint)
+@@ -88,10 +185,72 @@ void emberAfNetworkIdentityManagementClusterInitCallback(EndpointId endpoint)
  
-@@ -102,21 +203,128 @@ void emberAfNetworkIdentityManagementClusterInitCallback(EndpointId endpoint)
-     SuccessOrDie(CodegenDataModelProvider::Instance().Registry().Register(gNetworkIdentityManagementCluster.Registration()));
- }
- 
-+#if MATTER_ENABLE_UBUS
-+std::optional<OtbrThreadNetworkDiagnosticsProvider> gThreadDiagnosticsProvider;
-+#endif
-+
  static void ApplicationEarlyInit()
  {
-+#if MATTER_ENABLE_UBUS
-+    NimDiagnosticsProvider::Instance().SetPrimaryInterface(gPrimaryInterface);
-+    DeviceLayer::SetDiagnosticDataProvider(&NimDiagnosticsProvider::Instance());
++    // The identity comes from os-release and the host name everywhere; the
++    // Ethernet diagnostics need an interface to describe, so they are only
++    // installed when one is known.
 +    NimInstanceInfoProvider::Instance().Init();
-+#endif
- #if MATTER_ENABLE_UBUS
-     SuccessOrDie(gUbusManager.Init());
++    if (gPrimaryInterface != nullptr)
++    {
++        NimDiagnosticsProvider::Instance().SetPrimaryInterface(gPrimaryInterface);
++        DeviceLayer::SetDiagnosticDataProvider(&NimDiagnosticsProvider::Instance());
++    }
 +
-+    // Must be in place before endpoint initialization constructs the
-+    // Thread Network Diagnostics cluster: without an in-process Thread
-+    // stack, the default provider would report an unprovisioned device.
-+    gThreadDiagnosticsProvider.emplace(gUbusManager);
-+    SuccessOrDie(gThreadDiagnosticsProvider->Init());
-+    app::Clusters::ThreadNetworkDiagnostics::SetDefaultThreadNetworkDiagnosticsProvider(&*gThreadDiagnosticsProvider);
- #endif
+     ChipLogProgress(AppServer, "Network manager backend: %s", GetNimBackend().Name());
+     SuccessOrDie(GetNimBackend().EarlyInit());
  }
  
-+#if MATTER_ENABLE_UBUS
 +// Records the border router's own network in the Thread Network Directory,
 +// so the directory answers with the network of the home it lives in even
 +// before any controller has populated it. A dataset change (e.g. a PAN
@@ -1935,7 +2220,6 @@ index 5b3e2c0d08..e7170d0f88 100644
 +        ChipLogError(AppServer, "Seeding the Thread Network Directory failed: %" CHIP_ERROR_FORMAT, err.Format());
 +    }
 +}
-+#endif
 +
 +// The directory is persisted, so networks recorded while a border router
 +// was installed outlive it. Without one there is nothing to share, and a
@@ -1974,66 +2258,51 @@ index 5b3e2c0d08..e7170d0f88 100644
 +
  void ApplicationInit()
  {
--    TEMPORARY_RETURN_IGNORED gWiFiNetworkManagementServer->SetNetworkCredentials(ByteSpanFromCharSpan("MatterAP"_span),
--                                                                                 ByteSpanFromCharSpan("Setec Astronomy"_span));
- #if MATTER_ENABLE_UBUS
-+    // The cluster serves the router's real access point credentials, kept in
-+    // sync from netifd; procd pokes reload_wifi on wireless config changes.
-+    // An empty network name with no override disables sharing entirely: the
-+    // cluster then never holds credentials, so SSID reads null and
-+    // NetworkPassphraseRequest fails with InvalidInState.
-+    if ((gWifiNetworkName != nullptr && gWifiNetworkName[0] != '\0') || gWifiIfaceSection != nullptr)
-+    {
-+        ChipLogProgress(AppServer, "Wi-Fi credential source: network '%s', iface override '%s'", gWifiNetworkName,
-+                        gWifiIfaceSection != nullptr ? gWifiIfaceSection : "(none)");
-+        gWiFiCredentialsProvider.emplace(gUbusManager, *gWiFiNetworkManagementServer);
-+        SuccessOrDie(gWiFiCredentialsProvider->Init(gWifiNetworkName, gWifiIfaceSection));
-+        gMatterUbusService.SetReloadWifiHandler(
-+            [](void * context) { static_cast<WiFiCredentialsUbusProvider *>(context)->Refresh(); }, &*gWiFiCredentialsProvider);
-+    }
-+    else
-+    {
-+        ChipLogProgress(AppServer, "Wi-Fi credential sharing disabled");
-+    }
-+
+     // Without credentials the cluster's SSID reads null and
+@@ -107,7 +266,18 @@ void ApplicationInit()
+         SuccessOrDie(err);
+     }
+ 
+-    SuccessOrDie(GetNimBackend().Start());
 +    if (gThreadManaged)
 +    {
-+        gBorderRouterDelegate->SetActiveDatasetObserver(SeedThreadNetworkDirectory, nullptr);
++        GetNimBackend().SetActiveDatasetObserver(SeedThreadNetworkDirectory, nullptr);
 +    }
 +    else
 +    {
 +        ClearThreadNetworkDirectory();
 +    }
 +
-+    // Status sources for the ubus object: what the node currently shares.
-+    gMatterUbusService.SetWiFiCluster(&*gWiFiNetworkManagementServer);
-+    if (gThreadManaged && gThreadNetworkDirectoryServer.has_value())
-+    {
-+        gMatterUbusService.SetThreadDirectory(&gThreadNetworkDirectoryServer->Storage());
-+    }
-+
-     // Publish the "matter" ubus object once the server is up; its handlers
-     // read commissioning state owned by the server.
-     SuccessOrDie(gMatterUbusService.Init());
-+#else
-+    // Demo credentials for standalone testing without an OpenWrt backend.
-+    TEMPORARY_RETURN_IGNORED gWiFiNetworkManagementServer->SetNetworkCredentials(ByteSpanFromCharSpan("MatterAP"_span),
-+                                                                                 ByteSpanFromCharSpan("Setec Astronomy"_span));
- #endif
++    SuccessOrDie(GetNimBackend().Start(
++        &*gWiFiNetworkManagementServer,
++        gThreadManaged && gThreadNetworkDirectoryServer.has_value() ? &gThreadNetworkDirectoryServer->Storage() : nullptr));
  }
  
-@@ -129,7 +337,14 @@ void ApplicationShutdown()
+ void ApplicationShutdown()
+@@ -117,7 +287,25 @@ void ApplicationShutdown()
  
  int main(int argc, char * argv[])
  {
-+#if MATTER_ENABLE_UBUS
-+    // Must be in place before the stack caches its ethernet interface;
-+    // --primary-interface overrides it during argument parsing.
-+    setenv("CHIP_ETHERNET_INTERFACE", gPrimaryInterface, 0);
+-    VerifyOrReturnValue(ChipLinuxAppInit(argc, argv) == 0, -1);
++    AssembleOptions();
++    gPrimaryInterface = GetNimBackend().DefaultPrimaryInterface();
++
++    // The parser runs inside ChipLinuxAppInit, after which the stack has
++    // already cached its ethernet interface, so the command line is scanned
++    // for the primary interface ahead of it.
++    for (int i = 1; i + 1 < argc; i++)
++    {
++        if (strcmp(argv[i], "--primary-interface") == 0)
++        {
++            gPrimaryInterface = argv[i + 1];
++        }
++    }
++    if (gPrimaryInterface != nullptr)
++    {
++        setenv("CHIP_ETHERNET_INTERFACE", gPrimaryInterface, 0);
++    }
++
 +    VerifyOrReturnValue(ChipLinuxAppInit(argc, argv, &sAppOptions) == 0, -1);
-+#else
-     VerifyOrReturnValue(ChipLinuxAppInit(argc, argv) == 0, -1);
-+#endif
      ApplicationEarlyInit();
      ChipLinuxAppMainLoop();
      return 0;
@@ -2326,6 +2595,3 @@ index 54b516b22a..63083f7ef6 100644
 -}
 \ No newline at end of file
 +}
--- 
-2.55.0
-

@@ -1,4 +1,4 @@
-From 220ef4ce502b579f3a0a526782979f689ff6c77c Mon Sep 17 00:00:00 2001
+From 1d2f5a519a8df062eb368b8022e328166119dcf1 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:15:04 +0200
 Subject: [PATCH] [ubus] add a set_pending method for scheduling a migration
@@ -19,7 +19,7 @@ This is the ubus counterpart of the Thread Border Router Management
 cluster's SetPendingDatasetRequest, which the Matter delegate currently
 answers with NOT_IMPLEMENTED.
 
-Assisted-By: Claude Opus 5
+(cherry picked from commit 1c4d1021f9edbfdf026452d7ffffd8549007bd74)
 ---
  src/openwrt/ubus/otubus.cpp | 27 +++++++++++++++++++++++++++
  src/openwrt/ubus/otubus.hpp |  1 +
@@ -82,6 +82,3 @@ index 62476827..550a6ed4 100644
  
      // === Callbacks ===
  
--- 
-2.55.0
-

@@ -1,4 +1,4 @@
-From 1c9657810444be05ad4e866b4d5278c3b0fd6d51 Mon Sep 17 00:00:00 2001
+From 8eb63023e94bffaacfe608c97db0c141b8705196 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:34:19 +0200
 Subject: [PATCH] [network-manager] implement RevertActiveDataset in the fake
@@ -77,6 +77,3 @@ index 86a92c7c54..453c78ebeb 100644
  };
  
  } // namespace chip
--- 
-2.55.0
-

@@ -1,4 +1,4 @@
-From 4d16e79c15bf71ed56610bd330a4941d487f6f05 Mon Sep 17 00:00:00 2001
+From 30df1bd80b14870050fb18e40d998462ffd78bca Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 04:01:10 +0200
 Subject: [PATCH] [network-manager] report Ethernet counters and reboots
@@ -23,10 +23,13 @@ tell us about the last boot.
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 4235475c8a991baf8dc996c010ed39c0143ce40e)
+(cherry picked from commit 535ff67e1fc3f3eb47252718b4795bd186815d2c)
 ---
  .../linux/NimDiagnostics.cpp                  | 177 +++++++++++++++---
  .../linux/NimDiagnostics.h                    |  40 ++++
- 2 files changed, 189 insertions(+), 28 deletions(-)
+ examples/network-manager-app/linux/main.cpp   |   1 +
+ 3 files changed, 190 insertions(+), 28 deletions(-)
 
 diff --git a/examples/network-manager-app/linux/NimDiagnostics.cpp b/examples/network-manager-app/linux/NimDiagnostics.cpp
 index 17ab810589..c7c1f7632f 100644
@@ -349,6 +352,15 @@ index 9d73c15679..5c310b99f4 100644
  };
  
  } // namespace chip
--- 
-2.55.0
-
+diff --git a/examples/network-manager-app/linux/main.cpp b/examples/network-manager-app/linux/main.cpp
+index 9d12370b7b..0c7cbf76de 100644
+--- a/examples/network-manager-app/linux/main.cpp
++++ b/examples/network-manager-app/linux/main.cpp
+@@ -200,6 +200,7 @@ static void ApplicationEarlyInit()
+     if (gPrimaryInterface != nullptr)
+     {
+         NimDiagnosticsProvider::Instance().SetPrimaryInterface(gPrimaryInterface);
++        NimDiagnosticsProvider::Instance().Init();
+         DeviceLayer::SetDiagnosticDataProvider(&NimDiagnosticsProvider::Instance());
+     }
+ 

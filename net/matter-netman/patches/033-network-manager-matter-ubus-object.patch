@@ -1,4 +1,4 @@
-From 847e461a632ec1afb7db81718f387f2b046d2b93 Mon Sep 17 00:00:00 2001
+From 15fcc35af54dfad76ad6e551a22eca017cc75d3f Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Tue, 28 Jul 2026 04:11:25 +0200
 Subject: [PATCH] [network-manager] publish a matter ubus object
@@ -356,10 +356,10 @@ index 5f8c8b718b..4bbcb5d969 100644
      ///// Connection management
  
 diff --git a/examples/network-manager-app/linux/main.cpp b/examples/network-manager-app/linux/main.cpp
-index 9437c2fbce..5b3e2c0d08 100644
+index 78efe1a853..a086f58508 100644
 --- a/examples/network-manager-app/linux/main.cpp
 +++ b/examples/network-manager-app/linux/main.cpp
-@@ -30,6 +30,7 @@
+@@ -29,6 +29,7 @@
  #include <lib/support/Span.h>
  
  #if MATTER_ENABLE_UBUS
@@ -367,7 +367,7 @@ index 9437c2fbce..5b3e2c0d08 100644
  #include "ThreadBROpenThreadUbus.h"
  #include "UbusManager.h"
  #else
-@@ -49,6 +50,7 @@ ByteSpan ByteSpanFromCharSpan(CharSpan span)
+@@ -43,6 +44,7 @@ using namespace chip::app::Clusters;
  
  #if MATTER_ENABLE_UBUS
  ubus::UbusManager gUbusManager{};
@@ -375,10 +375,10 @@ index 9437c2fbce..5b3e2c0d08 100644
  #endif
  
  std::optional<DefaultThreadNetworkDirectoryServer> gThreadNetworkDirectoryServer;
-@@ -111,6 +113,11 @@ void ApplicationInit()
+@@ -105,6 +107,11 @@ void ApplicationInit()
  {
-     TEMPORARY_RETURN_IGNORED gWiFiNetworkManagementServer->SetNetworkCredentials(ByteSpanFromCharSpan("MatterAP"_span),
-                                                                                  ByteSpanFromCharSpan("Setec Astronomy"_span));
+     TEMPORARY_RETURN_IGNORED gWiFiNetworkManagementServer->SetNetworkCredentials(ByteSpan::fromCharSpan("MatterAP"_span),
+                                                                                  ByteSpan::fromCharSpan("Setec Astronomy"_span));
 +#if MATTER_ENABLE_UBUS
 +    // Publish the "matter" ubus object once the server is up; its handlers
 +    // read commissioning state owned by the server.
@@ -387,6 +387,3 @@ index 9437c2fbce..5b3e2c0d08 100644
  }
  
  void ApplicationShutdown()
--- 
-2.55.0
-

@@ -1,4 +1,4 @@
-From bfc0bc60f0ac7ac5cb2cdf3fd1b1448298c45789 Mon Sep 17 00:00:00 2001
+From 320664ebd417bd4092a7a5e5eff6908b1c2ed96e Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:34:19 +0200
 Subject: [PATCH] [network-manager] support pending datasets in the ubus
@@ -189,6 +189,3 @@ index 42690da15c..83c7b1a8b3 100644
      ActivateDatasetCallback * mActivateDatasetCallback = nullptr;
      uint32_t mActivateDatasetSequence;
  };
--- 
-2.55.0
-

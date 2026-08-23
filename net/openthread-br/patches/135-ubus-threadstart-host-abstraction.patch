@@ -1,4 +1,4 @@
-From 921cbcaa7c18155ff290bd0932b749e8654857e9 Mon Sep 17 00:00:00 2001
+From 3c3b78625f13c61c66f85f3e85edc160576f38a5 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 22:52:46 +0200
 Subject: [PATCH] [ubus] drive threadstart and threadstop through the host
@@ -18,7 +18,7 @@ with follow-up direct calls; both are no-ops when it is already up.
 threadstop now detaches gracefully before disabling, which it
 previously did not.
 
-Assisted-By: Claude Opus 5
+(cherry picked from commit bf977126bcc8466f0845d0b67e2dba315bedacd3)
 ---
  src/openwrt/ubus/otubus.cpp | 59 ++++++++++++++++++++++++++++++-------
  1 file changed, 48 insertions(+), 11 deletions(-)
@@ -101,6 +101,3 @@ index 86b58aec..21ee699c 100644
      return 0;
  }
  
--- 
-2.55.0
-

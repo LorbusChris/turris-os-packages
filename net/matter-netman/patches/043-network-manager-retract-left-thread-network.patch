@@ -1,4 +1,4 @@
-From a028729ac994911c8bbce5e8121a5ba54e89be81 Mon Sep 17 00:00:00 2001
+From b96d975c0b3f209fa7751f4e3baaf78bbdc10349 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 10:30:13 +0200
 Subject: [PATCH] [network-manager] retract the Thread network the border
@@ -27,11 +27,13 @@ reporting it as gone.
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 534068fd6f9a31fb0741aec1c86c1bdd0e9507d3)
+(cherry picked from commit 2a2b2ff1dbee37e58b3435c819a1aaa4c8a5c672)
 ---
  .../linux/ThreadBROpenThreadUbus.cpp          |  20 ++-
  .../linux/ThreadBROpenThreadUbus.h            |  14 +-
- examples/network-manager-app/linux/main.cpp   | 124 ++++++++++++++++--
- 3 files changed, 142 insertions(+), 16 deletions(-)
+ examples/network-manager-app/linux/main.cpp   | 122 ++++++++++++++++--
+ 3 files changed, 140 insertions(+), 16 deletions(-)
 
 diff --git a/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp b/examples/network-manager-app/linux/ThreadBROpenThreadUbus.cpp
 index ac993e4d04..ae27069cb0 100644
@@ -116,13 +118,13 @@ index 5983c0990c..758468ab7c 100644
      Thread::OperationalDataset mPendingDataset;
      ActivateDatasetCallback * mActivateDatasetCallback = nullptr;
 diff --git a/examples/network-manager-app/linux/main.cpp b/examples/network-manager-app/linux/main.cpp
-index c4ec45e0e8..5947ec3e64 100644
+index 0c7cbf76de..9e7aa38ba7 100644
 --- a/examples/network-manager-app/linux/main.cpp
 +++ b/examples/network-manager-app/linux/main.cpp
-@@ -236,20 +236,121 @@ static void ApplicationEarlyInit()
+@@ -208,20 +208,121 @@ static void ApplicationEarlyInit()
+     SuccessOrDie(GetNimBackend().EarlyInit());
  }
  
- #if MATTER_ENABLE_UBUS
 -// Records the border router's own network in the Thread Network Directory,
 -// so the directory answers with the network of the home it lives in even
 -// before any controller has populated it. A dataset change (e.g. a PAN
@@ -216,9 +218,9 @@ index c4ec45e0e8..5947ec3e64 100644
 +        }
 +    }
 +
-+    // otbr states the dataset again on every reconnect, byte for byte the same.
-+    // Recording it again would wake every subscriber to ThreadNetworks for no
-+    // change, so only an actual difference is written.
++    // The border router states the dataset again on every reconnect, byte for
++    // byte the same. Recording it again would wake every subscriber to
++    // ThreadNetworks for no change, so only an actual difference is written.
 +    uint8_t stored[Thread::kSizeOperationalDataset];
 +    MutableByteSpan storedSpan(stored);
 +    if (gThreadNetworkDirectoryServer->Storage().GetNetworkDataset(current, storedSpan) == CHIP_NO_ERROR &&
@@ -248,8 +250,8 @@ index c4ec45e0e8..5947ec3e64 100644
 +        }
      }
  }
- #endif
-@@ -277,7 +378,9 @@ void ClearThreadNetworkDirectory()
+ 
+@@ -248,7 +349,9 @@ void ClearThreadNetworkDirectory()
  
      for (size_t i = 0; i < count; i++)
      {
@@ -260,16 +262,11 @@ index c4ec45e0e8..5947ec3e64 100644
          if (err != CHIP_NO_ERROR)
          {
              ChipLogError(AppServer, "Clearing the Thread Network Directory failed: %" CHIP_ERROR_FORMAT, err.Format());
-@@ -287,6 +390,9 @@ void ClearThreadNetworkDirectory()
+@@ -258,6 +361,7 @@ void ClearThreadNetworkDirectory()
      {
          ChipLogProgress(AppServer, "Cleared %u Thread network(s) from the directory", static_cast<unsigned>(count));
      }
-+#if MATTER_ENABLE_UBUS
 +    StoreSeededNetwork(std::nullopt);
-+#endif
  }
  
  void ApplicationInit()
--- 
-2.55.0
-
