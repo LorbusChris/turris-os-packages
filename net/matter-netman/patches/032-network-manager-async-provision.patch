@@ -1,4 +1,4 @@
-From ddf48a69571946862cb8c9aeb1e241bf5f8d5c1a Mon Sep 17 00:00:00 2001
+From a51cb040d3295359662379376e146f12f2d8b640 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 23:49:36 +0200
 Subject: [PATCH] [network-manager] invoke provision and deprovision
@@ -176,6 +176,3 @@ index 09a03ac458..0803ce7831 100644
  }
  
  void OpenThreadUbusBorderRouterDelegate::OnDataReceived(blob_attr * msg, bool notification)
--- 
-2.55.0
-

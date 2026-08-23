@@ -1,4 +1,4 @@
-From 7285fc5161953c62c85be8b8964af1d046349708 Mon Sep 17 00:00:00 2001
+From 09c36a4db63cc7261b376cf7c85c897ae243d24b Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Fri, 24 Jul 2026 15:43:44 +0200
 Subject: [PATCH] [firewall] gate legacy firewall install on the nftables
@@ -9,7 +9,7 @@ themselves when the in-process nftables backend is in use, so the two
 never install duplicate or conflicting rules:
 
 - Docker run/finish scripts honor an OTBR_NFTABLES env flag: with it
-  set they skip the ipset/ip6tables ingress setup, the iptables NAT44
+  set they skip the ipset/ip6tables ingress filter, the iptables NAT44
   masquerade, and their teardown (the agent owns them).
 - OpenWrt: the otbr-firewall init script and the host script/setup
   firewall + otbr-nat44 services skip installation when OTBR_NFTABLES=ON
@@ -19,23 +19,49 @@ never install duplicate or conflicting rules:
 - Document the alternate OpenWrt dependency set (libmnl, libnftnl,
   kmod-nft-core, kmod-nft-nat) for OTBR_NFTABLES=ON builds.
 
+The build records the decision rather than asking the operator to repeat
+it: -DOTBR_NFTABLES=ON installs /usr/share/otbr/nftables-backend, and the
+Docker scripts and the host firewall/nat44 scripts read that when
+OTBR_NFTABLES is not set in the environment. The two must not drift
+apart: a build with the backend has OT_FIREWALL off, so nothing fills
+the legacy ipsets, and the legacy ingress chain installed against empty
+sets drops every unicast packet into Thread while the border router
+looks healthy -- the same silent failure as #3515. An explicit
+OTBR_NFTABLES still wins, as an override.
+
+The Docker gate is deliberately narrower than "skip everything". The
+accepts that authorize forwarding against the host's filter FORWARD
+policy stay in both modes -- the IPv4 accepts on the infrastructure
+interface, the IPv6 egress accept from #3521, and, in nftables mode, an
+IPv6 accept towards the Thread interface. The in-process backend cannot
+provide any of them: its rules live in an isolated `inet otbr` table,
+and an accept there is not terminal for the hook -- the host's FORWARD
+policy still applies afterwards (the traversal analysis in #3515). In
+legacy mode the ingress chain's terminal ACCEPT sits in the host's own
+filter table and authorizes inbound traffic on its way; the in-process
+filter is only a filter, so the authorization must come from the script.
+
 Legacy ipset/ip6tables remains the default in every path.
 
 Assisted-By: Claude Fable 5
+(cherry picked from commit 4ba1653d19671b99bb27683a5bb9a48756727190)
 ---
- etc/docker/border-router/Dockerfile           |  2 +
- .../etc/s6-overlay/s6-rc.d/otbr-agent/finish  | 45 +++++++++++--------
- .../etc/s6-overlay/s6-rc.d/otbr-agent/run     | 45 ++++++++++++-------
- etc/openwrt/openthread-br/Makefile            |  3 ++
- etc/openwrt/openthread-br/README.md           |  2 +-
- script/_firewall                              | 11 +++++
- script/_nat64                                 | 15 +++++++
- script/bootstrap                              |  7 ++-
- src/openwrt/CMakeLists.txt                    |  7 ++-
- 9 files changed, 98 insertions(+), 39 deletions(-)
+ etc/docker/border-router/Dockerfile           |   4 +
+ .../etc/s6-overlay/s6-rc.d/otbr-agent/finish  |  83 +++++++++--
+ .../etc/s6-overlay/s6-rc.d/otbr-agent/run     | 130 +++++++++++++++---
+ etc/openwrt/openthread-br/Makefile            |   3 +
+ etc/openwrt/openthread-br/README.md           |   2 +-
+ script/_firewall                              |  19 +++
+ script/_nat64                                 |  23 ++++
+ script/bootstrap                              |   7 +-
+ src/agent/CMakeLists.txt                      |   8 ++
+ src/agent/nftables-backend                    |   4 +
+ src/openwrt/CMakeLists.txt                    |   7 +-
+ 11 files changed, 257 insertions(+), 33 deletions(-)
+ create mode 100644 src/agent/nftables-backend
 
 diff --git a/etc/docker/border-router/Dockerfile b/etc/docker/border-router/Dockerfile
-index fdc0f135..0c604bee 100644
+index fdc0f135..b1383db0 100644
 --- a/etc/docker/border-router/Dockerfile
 +++ b/etc/docker/border-router/Dockerfile
 @@ -53,6 +53,8 @@ RUN set -x \
@@ -47,138 +73,281 @@ index fdc0f135..0c604bee 100644
             ninja-build \
             nodejs \
             npm \
+@@ -136,6 +138,8 @@ RUN set -x \
+            iptables \
+            iproute2 \
+            libjsoncpp25 \
++           libmnl0 \
++           libnftnl11 \
+            xz-utils \
+     && PLATFORM_SPEC="${TARGETARCH}${TARGETVARIANT:+/$TARGETVARIANT}" \
+     && case "${PLATFORM_SPEC}" in \
 diff --git a/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/finish b/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/finish
-index c0b7b09f..aa067271 100755
+index c0b7b09f..496654a4 100755
 --- a/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/finish
 +++ b/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/finish
-@@ -33,6 +33,13 @@ readonly OT_THREAD_IF
+@@ -30,9 +30,32 @@
+ OT_THREAD_IF="${OT_THREAD_IF:-wpan0}"
+ readonly OT_THREAD_IF
+ 
++OT_INFRA_IF="${OT_INFRA_IF:-wlan0}"
++readonly OT_INFRA_IF
++
  OT_FORWARD_INGRESS_CHAIN="OT_FORWARD_INGRESS"
  readonly OT_FORWARD_INGRESS_CHAIN
  
-+# Matches the flag in the run script. With OTBR_NFTABLES=1 no teardown is
-+# needed here: FirewallManager owns the `inet otbr` table lifecycle, and stale
++OT_DOCKER_USER_CHAIN="DOCKER-USER"
++readonly OT_DOCKER_USER_CHAIN
++
++# Resolved the same way as in the run script: the build's marker decides,
++# an explicit OTBR_NFTABLES overrides. With OTBR_NFTABLES=1 most teardown is
++# unnecessary: FirewallManager owns the `inet otbr` table lifecycle, and stale
 +# state from a crashed run is cleared by the next FirewallManager::Init()
-+# (DelTable is idempotent).
-+OTBR_NFTABLES="${OTBR_NFTABLES:-0}"
++# (DelTable is idempotent). The authorization accepts in the host's own tables
++# are the exception and are removed in both modes below.
++OTBR_NFTABLES_MARKER="/usr/share/otbr/nftables-backend"
++readonly OTBR_NFTABLES_MARKER
++if [ -z "${OTBR_NFTABLES:-}" ]; then
++    if [ -e "${OTBR_NFTABLES_MARKER}" ]; then
++        OTBR_NFTABLES=1
++    else
++        OTBR_NFTABLES=0
++    fi
++fi
 +readonly OTBR_NFTABLES
 +
  if test "$1" -eq 256 ; then
    e=$((128 + $2))
  else
-@@ -41,28 +48,30 @@ fi
+@@ -41,26 +64,64 @@ fi
  
  echo "otbr-agent exited with code ${1} (by signal ${2})."
  
--ipset_destroy_if_exist()
--{
--    while ipset list -n "$1" 2> /dev/null; do
++# `|| break` rather than `|| true`: a destroy that keeps failing leaves the set
++# in place, `ipset list -n` keeps succeeding, and the loop never ends -- hanging
++# container shutdown, since finish runs on the way out.
+ ipset_destroy_if_exist()
+ {
+     while ipset list -n "$1" 2> /dev/null; do
 -        ipset destroy "$1" || true
-+if [ "${OTBR_NFTABLES}" != "1" ]; then
-+    ipset_destroy_if_exist()
-+    {
-+        while ipset list -n "$1" 2> /dev/null; do
-+            ipset destroy "$1" || true
-+        done
-+    }
-+
-+    while ip6tables -C FORWARD -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}" 2> /dev/null; do
-+        ip6tables -D FORWARD -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}"
++        ipset destroy "$1" || break
      done
--}
+ }
  
 -while ip6tables -C FORWARD -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}" 2> /dev/null; do
 -    ip6tables -D FORWARD -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}"
 -done
-+    if ip6tables -L "${OT_FORWARD_INGRESS_CHAIN}" 2> /dev/null; then
-+        ip6tables -w -F "${OT_FORWARD_INGRESS_CHAIN}"
-+        ip6tables -w -X "${OT_FORWARD_INGRESS_CHAIN}"
-+    fi
++# Remove every copy of a rule, for either address family. Older images appended
++# some of these without checking for duplicates, so a host may carry several.
++#
++# `-w` keeps a busy xtables lock from ending the loop early, and `|| break`
++# catches everything else: without it a failing `-D` leaves the rule in place,
++# `-C` keeps succeeding, and this spins forever -- hanging container shutdown,
++# since finish runs on the way out.
++xtables_delete_all()
++{
++    local cmd="$1"
++    local table="$2"
++    shift 2
  
 -if ip6tables -L "${OT_FORWARD_INGRESS_CHAIN}" 2> /dev/null; then
 -    ip6tables -w -F "${OT_FORWARD_INGRESS_CHAIN}"
 -    ip6tables -w -X "${OT_FORWARD_INGRESS_CHAIN}"
--fi
++    while "${cmd}" -t "${table}" -w -C "$@" 2> /dev/null; do
++        "${cmd}" -t "${table}" -w -D "$@" || break
++    done
++}
++
++if [ "${OTBR_NFTABLES}" != "1" ]; then
++    xtables_delete_all ip6tables filter FORWARD -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}"
++
++    if ip6tables -w -L "${OT_FORWARD_INGRESS_CHAIN}" -n > /dev/null 2>&1; then
++        ip6tables -w -F "${OT_FORWARD_INGRESS_CHAIN}"
++        ip6tables -w -X "${OT_FORWARD_INGRESS_CHAIN}"
++    fi
++
 +    ipset_destroy_if_exist otbr-ingress-deny-src
 +    ipset_destroy_if_exist otbr-ingress-deny-src-swap
 +    ipset_destroy_if_exist otbr-ingress-allow-dst
 +    ipset_destroy_if_exist otbr-ingress-allow-dst-swap
++
++    xtables_delete_all iptables mangle PREROUTING -i "${OT_THREAD_IF}" -j MARK --set-mark 0x1001
++    xtables_delete_all iptables nat POSTROUTING -m mark --mark 0x1001 -j MASQUERADE
+ fi
  
 -ipset_destroy_if_exist otbr-ingress-deny-src
 -ipset_destroy_if_exist otbr-ingress-deny-src-swap
 -ipset_destroy_if_exist otbr-ingress-allow-dst
 -ipset_destroy_if_exist otbr-ingress-allow-dst-swap
--
--echo "OpenThread firewall rules removed."
-+    echo "OpenThread firewall rules removed."
-+fi
++# Remove the authorization accepts regardless of mode: run installs the egress
++# accept in both modes and the accept towards the Thread interface only in
++# nftables mode, and the mode may have changed since the rules were installed.
++# run may also have picked either chain depending on whether DOCKER-USER
++# existed at the time, and that can differ between start and stop, so both
++# are tried.
++for chain in "${OT_DOCKER_USER_CHAIN}" FORWARD; do
++    xtables_delete_all ip6tables filter "${chain}" -i "${OT_THREAD_IF}" -o "${OT_INFRA_IF}" -j ACCEPT
++    xtables_delete_all ip6tables filter "${chain}" -o "${OT_THREAD_IF}" -j ACCEPT
++done
++
++xtables_delete_all iptables filter FORWARD -o "${OT_INFRA_IF}" -j ACCEPT
++xtables_delete_all iptables filter FORWARD -i "${OT_INFRA_IF}" -j ACCEPT
  
- if test "$e" -ne 0 && test "$e" -ne 5; then
-     echo "$e" > /run/s6-linux-init-container-results/exitcode
+ echo "OpenThread firewall rules removed."
+ 
 diff --git a/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/run b/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/run
-index c5d98a8b..9c3d1efd 100755
+index c5d98a8b..1426243b 100755
 --- a/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/run
 +++ b/etc/docker/border-router/rootfs/etc/s6-overlay/s6-rc.d/otbr-agent/run
-@@ -51,6 +51,13 @@ readonly OT_REST_LISTEN_ADDR
+@@ -51,39 +51,133 @@ readonly OT_REST_LISTEN_ADDR
  OT_REST_LISTEN_PORT="${OT_REST_LISTEN_PORT:-8081}"
  readonly OT_REST_LISTEN_PORT
  
-+# Set OTBR_NFTABLES=1 when the image was built with -DOTBR_NFTABLES=ON: the
-+# ingress filter and NAT44 masquerade are then installed in-process by
-+# otbr-agent (FirewallManager) and the legacy ipset/ip6tables/iptables setup
-+# below is skipped.
-+OTBR_NFTABLES="${OTBR_NFTABLES:-0}"
++# An image built with -DOTBR_NFTABLES=ON has otbr-agent install the ingress
++# filter and NAT44 masquerade in-process (FirewallManager), and the legacy
++# ipset/ip6tables/iptables setup below must be skipped. The build records that
++# choice in a marker file rather than relying on the operator to repeat it:
++# such a build has OT_FIREWALL off, so nothing would fill the legacy ipsets,
++# and the legacy ingress chain would drop every unicast packet into Thread
++# against empty sets while everything else looked healthy. An explicit
++# OTBR_NFTABLES in the environment still wins.
++OTBR_NFTABLES_MARKER="/usr/share/otbr/nftables-backend"
++readonly OTBR_NFTABLES_MARKER
++if [ -z "${OTBR_NFTABLES:-}" ]; then
++    if [ -e "${OTBR_NFTABLES_MARKER}" ]; then
++        OTBR_NFTABLES=1
++    else
++        OTBR_NFTABLES=0
++    fi
++fi
 +readonly OTBR_NFTABLES
 +
  OT_FORWARD_INGRESS_CHAIN="OT_FORWARD_INGRESS"
  readonly OT_FORWARD_INGRESS_CHAIN
  
-@@ -62,28 +69,32 @@ die()
++OT_DOCKER_USER_CHAIN="DOCKER-USER"
++readonly OT_DOCKER_USER_CHAIN
++
+ die()
+ {
+     echo >&2 "ERROR: $*"
+     exit 1
+ }
  
- mkdir -p /data/thread && ln -sft /var/lib /data/thread || die "Could not create directory /var/lib/thread to store Thread data."
- 
+-mkdir -p /data/thread && ln -sft /var/lib /data/thread || die "Could not create directory /var/lib/thread to store Thread data."
+-
 -echo "Configuring OpenThread firewall..."
-+if [ "${OTBR_NFTABLES}" != "1" ]; then
-+    echo "Configuring OpenThread firewall..."
++# Add an iptables rule unless an identical one is already present.
++#
++# With `--network host` these rules are created in the host's netfilter
++# namespace and outlive the container, so a plain `-A` appends another copy on
++# every start of this service. `finish` removes them again, but it does not run
++# when the container is killed rather than stopped.
++#
++# `-w` is required, not cosmetic: without it a busy xtables lock makes `-C`
++# fail, which is indistinguishable from "rule not present" and falls through to
++# `-A` -- the guard would then create the very duplicate it exists to prevent.
++iptables_add_if_missing()
++{
++    local table="$1"
++    shift
  
 -ipset create -exist otbr-ingress-deny-src hash:net family inet6
 -ipset create -exist otbr-ingress-deny-src-swap hash:net family inet6
 -ipset create -exist otbr-ingress-allow-dst hash:net family inet6
 -ipset create -exist otbr-ingress-allow-dst-swap hash:net family inet6
-+    ipset create -exist otbr-ingress-deny-src hash:net family inet6
-+    ipset create -exist otbr-ingress-deny-src-swap hash:net family inet6
-+    ipset create -exist otbr-ingress-allow-dst hash:net family inet6
-+    ipset create -exist otbr-ingress-allow-dst-swap hash:net family inet6
++    iptables -t "${table}" -w -C "$@" 2> /dev/null || iptables -t "${table}" -w -A "$@"
++}
  
 -ip6tables -N "${OT_FORWARD_INGRESS_CHAIN}"
 -ip6tables -I FORWARD 1 -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}"
-+    ip6tables -N "${OT_FORWARD_INGRESS_CHAIN}"
-+    ip6tables -I FORWARD 1 -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}"
++mkdir -p /data/thread && ln -sft /var/lib /data/thread || die "Could not create directory /var/lib/thread to store Thread data."
  
 -ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m pkttype --pkt-type unicast -i "${OT_THREAD_IF}" -j DROP
 -ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m set --match-set otbr-ingress-deny-src src -j DROP
 -ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m set --match-set otbr-ingress-allow-dst dst -j ACCEPT
 -ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m pkttype --pkt-type unicast -j DROP
 -ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -j ACCEPT
-+    ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m pkttype --pkt-type unicast -i "${OT_THREAD_IF}" -j DROP
-+    ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m set --match-set otbr-ingress-deny-src src -j DROP
-+    ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m set --match-set otbr-ingress-allow-dst dst -j ACCEPT
-+    ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -m pkttype --pkt-type unicast -j DROP
-+    ip6tables -A "${OT_FORWARD_INGRESS_CHAIN}" -j ACCEPT
++if [ "${OTBR_NFTABLES}" != "1" ]; then
++    echo "Configuring OpenThread firewall..."
++
++    ipset create -exist otbr-ingress-deny-src hash:net family inet6
++    ipset create -exist otbr-ingress-deny-src-swap hash:net family inet6
++    ipset create -exist otbr-ingress-allow-dst hash:net family inet6
++    ipset create -exist otbr-ingress-allow-dst-swap hash:net family inet6
++
++    # Create the chain, or empty it if a previous run left it behind. The rules
++    # below are appended unconditionally, so a surviving chain would end up
++    # holding two copies of each of them.
++    ip6tables -w -N "${OT_FORWARD_INGRESS_CHAIN}" 2> /dev/null ||
++        ip6tables -w -F "${OT_FORWARD_INGRESS_CHAIN}"
++
++    # The jump into that chain lives in FORWARD and outlives the container as
++    # well.
++    ip6tables -w -C FORWARD -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}" 2> /dev/null ||
++        ip6tables -w -I FORWARD 1 -o "${OT_THREAD_IF}" -j "${OT_FORWARD_INGRESS_CHAIN}"
++
++    ip6tables -w -A "${OT_FORWARD_INGRESS_CHAIN}" -m pkttype --pkt-type unicast -i "${OT_THREAD_IF}" -j DROP
++    ip6tables -w -A "${OT_FORWARD_INGRESS_CHAIN}" -m set --match-set otbr-ingress-deny-src src -j DROP
++    ip6tables -w -A "${OT_FORWARD_INGRESS_CHAIN}" -m set --match-set otbr-ingress-allow-dst dst -j ACCEPT
++    ip6tables -w -A "${OT_FORWARD_INGRESS_CHAIN}" -m pkttype --pkt-type unicast -j DROP
++    ip6tables -w -A "${OT_FORWARD_INGRESS_CHAIN}" -j ACCEPT
++else
++    echo "OTBR_NFTABLES=1: ingress filter and NAT44 are managed in-process by otbr-agent."
++fi
++
++# Traffic leaving the Thread network needs an explicit accept. The ingress
++# filter above only filters what the host already forwards; it does nothing for
++# the other direction, which until now relied on the FORWARD policy being
++# ACCEPT. That does not hold under Docker, which manages ip6tables and sets the
++# policy to DROP. The result is a one-directional, silent failure: requests
++# into the mesh work, every reply out of it is dropped, and the border router
++# looks perfectly healthy throughout.
++#
++# This authorization is needed in both firewall modes. The in-process nftables
++# backend cannot provide it: its rules live in an isolated `inet otbr` table,
++# and an accept there is not terminal for the hook -- the host's `filter
++# FORWARD` policy still applies afterwards (see #3515). Only a rule in the
++# host's own table can authorize forwarding against a DROP policy there.
++#
++# DOCKER-USER is the chain Docker reserves for user rules and does not rewrite
++# when it rebuilds its own; fall back to FORWARD where it does not exist.
++if ip6tables -w -L "${OT_DOCKER_USER_CHAIN}" -n > /dev/null 2>&1; then
++    egress_chain="${OT_DOCKER_USER_CHAIN}"
++else
++    egress_chain="FORWARD"
++fi
++readonly egress_chain
++
++ip6tables -w -C "${egress_chain}" -i "${OT_THREAD_IF}" -o "${OT_INFRA_IF}" -j ACCEPT 2> /dev/null ||
++    ip6tables -w -I "${egress_chain}" 1 -i "${OT_THREAD_IF}" -o "${OT_INFRA_IF}" -j ACCEPT
++
++if [ "${OTBR_NFTABLES}" = "1" ]; then
++    # In legacy mode the ingress chain's terminal ACCEPT sits in the host's
++    # filter FORWARD and authorizes traffic into the Thread network on its way.
++    # The in-process ingress filter cannot (same reason as above), so traffic
++    # a DROP policy would eat needs its authorization here; what the in-process
++    # filter drops is gone before this rule matters.
++    ip6tables -w -C "${egress_chain}" -o "${OT_THREAD_IF}" -j ACCEPT 2> /dev/null ||
++        ip6tables -w -I "${egress_chain}" 1 -o "${OT_THREAD_IF}" -j ACCEPT
++fi
  
--echo "Configuring OpenThread NAT64..."
-+    echo "Configuring OpenThread NAT64..."
+ echo "Configuring OpenThread NAT64..."
  
 -iptables -t mangle -A PREROUTING -i "${OT_THREAD_IF}" -j MARK --set-mark 0x1001
 -iptables -t nat -A POSTROUTING -m mark --mark 0x1001 -j MASQUERADE
 -iptables -t filter -A FORWARD -o "${OT_INFRA_IF}" -j ACCEPT
 -iptables -t filter -A FORWARD -i "${OT_INFRA_IF}" -j ACCEPT
-+    iptables -t mangle -A PREROUTING -i "${OT_THREAD_IF}" -j MARK --set-mark 0x1001
-+    iptables -t nat -A POSTROUTING -m mark --mark 0x1001 -j MASQUERADE
-+    iptables -t filter -A FORWARD -o "${OT_INFRA_IF}" -j ACCEPT
-+    iptables -t filter -A FORWARD -i "${OT_INFRA_IF}" -j ACCEPT
-+else
-+    echo "OTBR_NFTABLES=1: firewall and NAT44 are managed in-process by otbr-agent."
++if [ "${OTBR_NFTABLES}" != "1" ]; then
++    iptables_add_if_missing mangle PREROUTING -i "${OT_THREAD_IF}" -j MARK --set-mark 0x1001
++    iptables_add_if_missing nat POSTROUTING -m mark --mark 0x1001 -j MASQUERADE
 +fi
++
++# Authorization again, not translation: these accepts let NAT64/NAT44 flows
++# cross a DROP policy in the host's filter FORWARD, which the in-process
++# backend cannot do from its own table. Both firewall modes need them.
++iptables_add_if_missing filter FORWARD -o "${OT_INFRA_IF}" -j ACCEPT
++iptables_add_if_missing filter FORWARD -i "${OT_INFRA_IF}" -j ACCEPT
  
  echo "Starting otbr-agent..."
  
@@ -210,23 +379,31 @@ index a99d5bf6..97d33784 100644
  
  ## Usage
 diff --git a/script/_firewall b/script/_firewall
-index 28344d24..d4ceb7ee 100755
+index 28344d24..3ff7fb05 100755
 --- a/script/_firewall
 +++ b/script/_firewall
-@@ -33,6 +33,12 @@ sudo modprobe ip6table_filter || true
+@@ -33,6 +33,20 @@ sudo modprobe ip6table_filter || true
  
  FIREWALL="${FIREWALL:-1}"
  
 +# When otbr-agent is built with the opt-in in-process nftables firewall
 +# backend (-DOTBR_NFTABLES=ON), it owns the OTBR ingress filter, so the
-+# legacy ipset/ip6tables service must not be installed alongside it.
-+# Native installs of such a build should export OTBR_NFTABLES=1.
-+OTBR_NFTABLES="${OTBR_NFTABLES:-0}"
++# legacy ipset/ip6tables service must not be installed alongside it. Such a
++# build installs a marker file saying so; an explicit OTBR_NFTABLES in the
++# environment overrides it.
++OTBR_NFTABLES_MARKER="/usr/share/otbr/nftables-backend"
++if [ -z "${OTBR_NFTABLES:-}" ]; then
++    if [ -e "${OTBR_NFTABLES_MARKER}" ]; then
++        OTBR_NFTABLES=1
++    else
++        OTBR_NFTABLES=0
++    fi
++fi
 +
  firewall_uninstall()
  {
      with FIREWALL || return 0
-@@ -52,6 +58,11 @@ firewall_install()
+@@ -52,6 +66,11 @@ firewall_install()
  {
      with FIREWALL || return 0
  
@@ -239,18 +416,26 @@ index 28344d24..d4ceb7ee 100755
      sudo chmod a+x $FIREWALL_SERVICE
      if have systemctl; then
 diff --git a/script/_nat64 b/script/_nat64
-index 3f063f94..984e90ac 100644
+index 3f063f94..f4dd85d0 100644
 --- a/script/_nat64
 +++ b/script/_nat64
-@@ -34,8 +34,19 @@ NAT44_SERVICE=/etc/init.d/otbr-nat44
+@@ -34,8 +34,27 @@ NAT44_SERVICE=/etc/init.d/otbr-nat44
  WLAN_IFNAMES="${INFRA_IF_NAME:-eth0}"
  THREAD_IF="${THREAD_IF:-wpan0}"
  
 +# When otbr-agent is built with the opt-in in-process nftables firewall
 +# backend (-DOTBR_NFTABLES=ON), it installs the NAT44 masquerade rules
 +# itself, so the legacy iptables otbr-nat44 service must not duplicate them.
-+# Native installs of such a build should export OTBR_NFTABLES=1.
-+OTBR_NFTABLES="${OTBR_NFTABLES:-0}"
++# Such a build installs a marker file saying so; an explicit OTBR_NFTABLES
++# in the environment overrides it.
++OTBR_NFTABLES_MARKER="/usr/share/otbr/nftables-backend"
++if [ -z "${OTBR_NFTABLES:-}" ]; then
++    if [ -e "${OTBR_NFTABLES_MARKER}" ]; then
++        OTBR_NFTABLES=1
++    else
++        OTBR_NFTABLES=0
++    fi
++fi
 +
  nat44_install()
  {
@@ -262,7 +447,7 @@ index 3f063f94..984e90ac 100644
      sudo tee $NAT44_SERVICE <<EOF
  #! /bin/sh
  #
-@@ -128,6 +139,10 @@ nat44_uninstall()
+@@ -128,6 +147,10 @@ nat44_uninstall()
  
  nat44_start()
  {
@@ -299,6 +484,35 @@ index d0cbd140..4016917b 100755
      sudo $PM install -y jsoncpp-devel
      sudo $PM install -y wget
      sudo $PM install -y protobuf protobuf-devel
+diff --git a/src/agent/CMakeLists.txt b/src/agent/CMakeLists.txt
+index 801a2a12..2a0058cf 100644
+--- a/src/agent/CMakeLists.txt
++++ b/src/agent/CMakeLists.txt
+@@ -110,6 +110,14 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/otbr-agent.default
+     RENAME otbr-agent
+ )
+ 
++if(OTBR_NFTABLES)
++    # Record the in-process firewall backend where the legacy firewall scripts
++    # can see it, so they need not be told separately what the build decided.
++    install(FILES nftables-backend
++        DESTINATION ${CMAKE_INSTALL_FULL_DATADIR}/otbr
++    )
++endif()
++
+ pkg_check_modules(LIBSYSTEMD libsystemd)
+ if(LIBSYSTEMD_FOUND)
+     target_compile_definitions(otbr-config INTERFACE "HAVE_LIBSYSTEMD=1")
+diff --git a/src/agent/nftables-backend b/src/agent/nftables-backend
+new file mode 100644
+index 00000000..caad422c
+--- /dev/null
++++ b/src/agent/nftables-backend
+@@ -0,0 +1,4 @@
++# Installed by a build with -DOTBR_NFTABLES=ON. otbr-agent then installs the
++# Thread ingress filter and the NAT44 masquerade in-process, and the scripts
++# that set up the legacy ipset/ip6tables/iptables rules read this file to skip
++# them. Setting OTBR_NFTABLES in the environment overrides it.
 diff --git a/src/openwrt/CMakeLists.txt b/src/openwrt/CMakeLists.txt
 index 8237f38b..91fa0012 100644
 --- a/src/openwrt/CMakeLists.txt
@@ -318,6 +532,3 @@ index 8237f38b..91fa0012 100644
          RENAME otbr-firewall)
 -endif(OT_FIREWALL)
 +endif()
--- 
-2.55.0
-

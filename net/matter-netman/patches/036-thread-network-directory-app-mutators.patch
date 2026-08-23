@@ -1,4 +1,4 @@
-From 7f820a22b4f37d8ef6af255ac8d4e50588b479e6 Mon Sep 17 00:00:00 2001
+From a4ae585fc00ffd52649c0c6fdc02800d2e65c098 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 10:30:12 +0200
 Subject: [PATCH] [thread-network-directory] let an application record and
@@ -20,6 +20,8 @@ there is none.
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 16167350c28a8ff5388a9e37287ccd5b221b6c04)
+(cherry picked from commit a75b1505e13c548b3d9929e768ad3a189c30bdde)
 ---
  .../CodegenIntegration.h                      |  23 ++++
  .../ThreadNetworkDirectoryCluster.cpp         | 107 ++++++++++++++++
@@ -382,6 +384,3 @@ index e228ea4093..6dfdf145ff 100644
  // ---------------------------------------------------------------------------
  // TestThreadNetworksList: list is initially empty; after directly adding
  // networks to the storage the attribute encodes correct field values.
--- 
-2.55.0
-

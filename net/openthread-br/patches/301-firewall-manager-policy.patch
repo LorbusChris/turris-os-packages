@@ -1,4 +1,4 @@
-From 37e0ad17bca921073af7f2bb7ffb5fb0b9983c87 Mon Sep 17 00:00:00 2001
+From 390162b36c1ab6f332bc2f5b51161dfc0533c797 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Fri, 24 Jul 2026 15:42:58 +0200
 Subject: [PATCH] [firewall] add FirewallManager policy layer with unit tests
@@ -15,16 +15,24 @@ never a half-populated window.
 The gmock-based unit tests pin the chain/set/rule construction
 sequences and argument values against a mock backend.
 
-Assisted-By: Claude Fable 5
+The chain and set name constants are plain `static const char *const`,
+declared in the header and defined once in the .cpp, rather than
+constexpr members: under C++17 a static constexpr member is implicitly
+inline, and its weak per-TU definitions collide with the C++11
+out-of-line ones as soon as part of a build -- a C++17-only gtest, for
+instance -- compiles the header under the newer standard. One
+definition means the same thing in every standard.
+
+(cherry picked from commit 4f555283bef47d6bd378a1114c18cc5b726f6389)
 ---
  src/CMakeLists.txt                    |   4 +-
  src/firewall/CMakeLists.txt           |   4 +-
- src/firewall/firewall_manager.cpp     | 376 ++++++++++++++
- src/firewall/firewall_manager.hpp     | 165 +++++++
- tests/gtest/CMakeLists.txt            |  28 ++
+ src/firewall/firewall_manager.cpp     | 362 +++++++++++++
+ src/firewall/firewall_manager.hpp     | 169 ++++++
+ tests/gtest/CMakeLists.txt            |  24 +
  tests/gtest/fake_netlink_socket.hpp   | 177 +++++++
- tests/gtest/test_firewall_manager.cpp | 672 ++++++++++++++++++++++++++
- 7 files changed, 1422 insertions(+), 4 deletions(-)
+ tests/gtest/test_firewall_manager.cpp | 723 ++++++++++++++++++++++++++
+ 7 files changed, 1459 insertions(+), 4 deletions(-)
  create mode 100644 src/firewall/firewall_manager.cpp
  create mode 100644 src/firewall/firewall_manager.hpp
  create mode 100644 tests/gtest/fake_netlink_socket.hpp
@@ -46,7 +54,7 @@ index cf358253..6bc236ee 100644
  if(OTBR_OPENWRT)
      add_subdirectory(openwrt)
 diff --git a/src/firewall/CMakeLists.txt b/src/firewall/CMakeLists.txt
-index 78aeefcf..f94495f0 100644
+index e2d6f0d1..e891a458 100644
 --- a/src/firewall/CMakeLists.txt
 +++ b/src/firewall/CMakeLists.txt
 @@ -26,7 +26,9 @@
@@ -62,10 +70,10 @@ index 78aeefcf..f94495f0 100644
      list(APPEND OTBR_FIREWALL_SOURCES
 diff --git a/src/firewall/firewall_manager.cpp b/src/firewall/firewall_manager.cpp
 new file mode 100644
-index 00000000..124f8988
+index 00000000..02e5ea80
 --- /dev/null
 +++ b/src/firewall/firewall_manager.cpp
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,362 @@
 +/*
 + *    Copyright (c) 2026, The OpenThread Authors.
 + *    All rights reserved.
@@ -106,18 +114,15 @@ index 00000000..124f8988
 +namespace otbr {
 +namespace Firewall {
 +
-+// Out-of-line definitions for the static constexpr members: they are ODR-used
-+// (e.g. bound to `const std::string &` in the unit tests), which C++11/14
-+// require a namespace-scope definition for.
-+constexpr const char *FirewallManager::kTableName;
-+constexpr const char *FirewallManager::kIngressChain;
-+constexpr const char *FirewallManager::kPreroutingChain;
-+constexpr const char *FirewallManager::kNatPreroutingChain;
-+constexpr const char *FirewallManager::kNatPostroutingChain;
-+constexpr const char *FirewallManager::kNatForwardChain;
-+constexpr const char *FirewallManager::kIngressDenySrcSet;
-+constexpr const char *FirewallManager::kIngressAllowDstSet;
-+constexpr uint32_t    FirewallManager::kNat44Mark;
++const char *const  FirewallManager::kTableName           = "otbr";
++const char *const  FirewallManager::kIngressChain        = "forward_ingress";
++const char *const  FirewallManager::kPreroutingChain     = "dua_prerouting";
++const char *const  FirewallManager::kNatPreroutingChain  = "nat_prerouting";
++const char *const  FirewallManager::kNatPostroutingChain = "nat_postrouting";
++const char *const  FirewallManager::kNatForwardChain     = "nat_forward";
++const char *const  FirewallManager::kIngressDenySrcSet   = "ingress_deny_src";
++const char *const  FirewallManager::kIngressAllowDstSet  = "ingress_allow_dst";
++constexpr uint32_t FirewallManager::kNat44Mark;
 +
 +FirewallManager::FirewallManager(INftables &aNftables, std::string aThreadInterfaceName)
 +    : mNftables(aNftables)
@@ -197,7 +202,7 @@ index 00000000..124f8988
 +    SuccessOrExit(error = mNftables.AddIp6PrefixSet(kTableName, kIngressDenySrcSet));
 +    SuccessOrExit(error = mNftables.AddIp6PrefixSet(kTableName, kIngressAllowDstSet));
 +
-+    SuccessOrExit(error = mNftables.AddChain(kTableName, kIngressChain, Hook::kForward, kPriorityFilter));
++    SuccessOrExit(error = mNftables.AddChain(kTableName, kIngressChain, Hook::kForward, ChainPriority::kFilter));
 +
 +    SuccessOrExit(error = mNftables.AddRuleOifnameNeqReturn(kTableName, kIngressChain, mThreadIfName, nullptr));
 +    SuccessOrExit(error = mNftables.AddRuleIifPkttypeVerdict(kTableName, kIngressChain, mThreadIfName,
@@ -235,21 +240,21 @@ index 00000000..124f8988
 +
 +    // Mangle-prerouting: tag packets coming from the Thread interface so the
 +    // postrouting chain can MASQUERADE them. Type filter, mangle priority.
-+    SuccessOrExit(error = mNftables.AddChain(kTableName, kNatPreroutingChain, Hook::kPrerouting, kPriorityMangle,
++    SuccessOrExit(error = mNftables.AddChain(kTableName, kNatPreroutingChain, Hook::kPrerouting, ChainPriority::kMangle,
 +                                             ChainType::kFilter));
 +    SuccessOrExit(error =
 +                      mNftables.AddRuleIifMark(kTableName, kNatPreroutingChain, mThreadIfName, kNat44Mark, nullptr));
 +
 +    // Postrouting: source-NAT marked traffic. Type nat, srcnat priority.
-+    SuccessOrExit(error = mNftables.AddChain(kTableName, kNatPostroutingChain, Hook::kPostrouting, kPrioritySrcNat,
-+                                             ChainType::kNat));
++    SuccessOrExit(error = mNftables.AddChain(kTableName, kNatPostroutingChain, Hook::kPostrouting,
++                                             ChainPriority::kSrcNat, ChainType::kNat));
 +    SuccessOrExit(error = mNftables.AddRuleMarkMasquerade(kTableName, kNatPostroutingChain, kNat44Mark, nullptr));
 +
 +    // Forward: accept traffic in either direction on the upstream interface.
 +    // Hooked at FORWARD/filter alongside forward_ingress; the iifname/oifname
 +    // matches scope each rule cleanly.
-+    SuccessOrExit(
-+        error = mNftables.AddChain(kTableName, kNatForwardChain, Hook::kForward, kPriorityFilter, ChainType::kFilter));
++    SuccessOrExit(error = mNftables.AddChain(kTableName, kNatForwardChain, Hook::kForward, ChainPriority::kFilter,
++                                             ChainType::kFilter));
 +    SuccessOrExit(error = mNftables.AddRuleOifnameVerdict(kTableName, kNatForwardChain, aUpstreamInterfaceName,
 +                                                          Verdict::kAccept, nullptr));
 +    SuccessOrExit(error = mNftables.AddRuleIifnameVerdict(kTableName, kNatForwardChain, aUpstreamInterfaceName,
@@ -274,7 +279,6 @@ index 00000000..124f8988
 +{
 +    otbrError error     = OTBR_ERROR_NONE;
 +    uint64_t  newHandle = 0;
-+    Ip6Net    daddr     = ToIp6Net(aDomainPrefix);
 +
 +    VerifyOrExit(mInitialized, error = OTBR_ERROR_INVALID_STATE);
 +    VerifyOrExit(aDomainPrefix.IsValid(), error = OTBR_ERROR_INVALID_ARGS);
@@ -284,7 +288,7 @@ index 00000000..124f8988
 +
 +    if (!mDuaChainCreated)
 +    {
-+        SuccessOrExit(error = mNftables.AddChain(kTableName, kPreroutingChain, Hook::kPrerouting, kPriorityRaw));
++        SuccessOrExit(error = mNftables.AddChain(kTableName, kPreroutingChain, Hook::kPrerouting, ChainPriority::kRaw));
 +    }
 +
 +    if (mNdRuleHandle != 0)
@@ -292,8 +296,8 @@ index 00000000..124f8988
 +        SuccessOrExit(error = mNftables.DelRule(kTableName, kPreroutingChain, mNdRuleHandle));
 +    }
 +
-+    SuccessOrExit(error = mNftables.AddRuleNdNsRedirect(kTableName, kPreroutingChain, daddr, aBackboneInterfaceName,
-+                                                        aQueueNum, &newHandle));
++    SuccessOrExit(error = mNftables.AddRuleNdNsRedirect(kTableName, kPreroutingChain, aDomainPrefix,
++                                                        aBackboneInterfaceName, aQueueNum, &newHandle));
 +
 +    SuccessOrExit(error = mNftables.CommitBatch());
 +
@@ -334,13 +338,12 @@ index 00000000..124f8988
 +otbrError FirewallManager::AddIngressSetElement(IngressSet aSet, const Ip6Prefix &aPrefix)
 +{
 +    otbrError error = OTBR_ERROR_NONE;
-+    Ip6Net    net   = ToIp6Net(aPrefix);
 +
 +    VerifyOrExit(mIngressFilterEnabled, error = OTBR_ERROR_INVALID_STATE);
 +    VerifyOrExit(aPrefix.IsValid(), error = OTBR_ERROR_INVALID_ARGS);
 +
 +    SuccessOrExit(error = mNftables.BeginBatch());
-+    SuccessOrExit(error = mNftables.AddSetElement(kTableName, SetName(aSet), net));
++    SuccessOrExit(error = mNftables.AddSetElement(kTableName, SetName(aSet), aPrefix));
 +    SuccessOrExit(error = mNftables.CommitBatch());
 +
 +exit:
@@ -354,13 +357,12 @@ index 00000000..124f8988
 +otbrError FirewallManager::DelIngressSetElement(IngressSet aSet, const Ip6Prefix &aPrefix)
 +{
 +    otbrError error = OTBR_ERROR_NONE;
-+    Ip6Net    net   = ToIp6Net(aPrefix);
 +
 +    VerifyOrExit(mIngressFilterEnabled, error = OTBR_ERROR_INVALID_STATE);
 +    VerifyOrExit(aPrefix.IsValid(), error = OTBR_ERROR_INVALID_ARGS);
 +
 +    SuccessOrExit(error = mNftables.BeginBatch());
-+    SuccessOrExit(error = mNftables.DelSetElement(kTableName, SetName(aSet), net));
++    SuccessOrExit(error = mNftables.DelSetElement(kTableName, SetName(aSet), aPrefix));
 +    SuccessOrExit(error = mNftables.CommitBatch());
 +
 +exit:
@@ -402,12 +404,12 @@ index 00000000..124f8988
 +    for (const Ip6Prefix &prefix : aDenySrc)
 +    {
 +        VerifyOrExit(prefix.IsValid(), error = OTBR_ERROR_INVALID_ARGS);
-+        SuccessOrExit(error = mNftables.AddSetElement(kTableName, kIngressDenySrcSet, ToIp6Net(prefix)));
++        SuccessOrExit(error = mNftables.AddSetElement(kTableName, kIngressDenySrcSet, prefix));
 +    }
 +    for (const Ip6Prefix &prefix : aAllowDst)
 +    {
 +        VerifyOrExit(prefix.IsValid(), error = OTBR_ERROR_INVALID_ARGS);
-+        SuccessOrExit(error = mNftables.AddSetElement(kTableName, kIngressAllowDstSet, ToIp6Net(prefix)));
++        SuccessOrExit(error = mNftables.AddSetElement(kTableName, kIngressAllowDstSet, prefix));
 +    }
 +    SuccessOrExit(error = mNftables.CommitBatch());
 +
@@ -432,22 +434,14 @@ index 00000000..124f8988
 +    return "";
 +}
 +
-+Ip6Net FirewallManager::ToIp6Net(const Ip6Prefix &aPrefix)
-+{
-+    Ip6Net net;
-+    memcpy(net.mAddr, aPrefix.mPrefix.m8, sizeof(net.mAddr));
-+    net.mPrefixLen = aPrefix.mLength;
-+    return net;
-+}
-+
 +} // namespace Firewall
 +} // namespace otbr
 diff --git a/src/firewall/firewall_manager.hpp b/src/firewall/firewall_manager.hpp
 new file mode 100644
-index 00000000..48456855
+index 00000000..fd97fefc
 --- /dev/null
 +++ b/src/firewall/firewall_manager.hpp
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,169 @@
 +/*
 + *    Copyright (c) 2026, The OpenThread Authors.
 + *    All rights reserved.
@@ -584,21 +578,25 @@ index 00000000..48456855
 +    bool IsIngressFilterEnabled(void) const { return mIngressFilterEnabled; }
 +    bool IsNat44Enabled(void) const { return mNat44Enabled; }
 +
-+    static constexpr const char *kTableName           = "otbr";
-+    static constexpr const char *kIngressChain        = "forward_ingress";
-+    static constexpr const char *kPreroutingChain     = "dua_prerouting";
-+    static constexpr const char *kNatPreroutingChain  = "nat_prerouting";
-+    static constexpr const char *kNatPostroutingChain = "nat_postrouting";
-+    static constexpr const char *kNatForwardChain     = "nat_forward";
-+    static constexpr const char *kIngressDenySrcSet   = "ingress_deny_src";
-+    static constexpr const char *kIngressAllowDstSet  = "ingress_allow_dst";
++    // Plain const rather than constexpr: under C++17 a static constexpr
++    // member is implicitly inline, and its weak per-TU definitions collide
++    // with the C++11 out-of-line ones when parts of a build (a C++17 gtest,
++    // say) compile this header under a newer standard. A single definition
++    // in the .cpp means the same thing in every standard.
++    static const char *const kTableName;
++    static const char *const kIngressChain;
++    static const char *const kPreroutingChain;
++    static const char *const kNatPreroutingChain;
++    static const char *const kNatPostroutingChain;
++    static const char *const kNatForwardChain;
++    static const char *const kIngressDenySrcSet;
++    static const char *const kIngressAllowDstSet;
 +
 +    /// Mark used to tag NAT44'd traffic from the Thread interface.
 +    static constexpr uint32_t kNat44Mark = 0x1001;
 +
 +private:
 +    static const char *SetName(IngressSet aSet);
-+    static Ip6Net      ToIp6Net(const Ip6Prefix &aPrefix);
 +
 +    INftables  &mNftables;
 +    std::string mThreadIfName;
@@ -614,10 +612,10 @@ index 00000000..48456855
 +
 +#endif // OTBR_FIREWALL_FIREWALL_MANAGER_HPP_
 diff --git a/tests/gtest/CMakeLists.txt b/tests/gtest/CMakeLists.txt
-index 952686b5..b4b4c708 100644
+index 952686b5..b72749ee 100644
 --- a/tests/gtest/CMakeLists.txt
 +++ b/tests/gtest/CMakeLists.txt
-@@ -56,6 +56,34 @@ target_link_libraries(otbr-gtest-unit
+@@ -56,6 +56,30 @@ target_link_libraries(otbr-gtest-unit
  )
  gtest_discover_tests(otbr-gtest-unit)
  
@@ -632,19 +630,15 @@ index 952686b5..b4b4c708 100644
 +)
 +
 +if(OTBR_NFTABLES)
-+    # The backend tests drive Nftables directly, so they need the libmnl headers
-+    # that otbr-firewall keeps private.
 +    target_include_directories(otbr-gtest-firewall PRIVATE
 +        ${CMAKE_CURRENT_SOURCE_DIR}
-+        ${LIBNFTNL_INCLUDE_DIRS}
-+        ${LIBMNL_INCLUDE_DIRS}
 +    )
 +
 +    # The fake socket parses replies with mnl_cb_run(), and otbr-firewall links
 +    # libmnl PRIVATE, so the test binary needs its own link to it.
 +    target_link_libraries(otbr-gtest-firewall
-+        $<$<BOOL:${LIBMNL_LIBRARY_DIRS}>:-L$<JOIN:${LIBMNL_LIBRARY_DIRS}," -L">>
-+        ${LIBMNL_LIBRARIES}
++        PkgConfig::LIBNFTNL
++        PkgConfig::LIBMNL
 +    )
 +endif()
 +gtest_discover_tests(otbr-gtest-firewall)
@@ -837,10 +831,10 @@ index 00000000..669e0d7f
 +#endif // OTBR_TEST_FAKE_NETLINK_SOCKET_HPP_
 diff --git a/tests/gtest/test_firewall_manager.cpp b/tests/gtest/test_firewall_manager.cpp
 new file mode 100644
-index 00000000..ebfca860
+index 00000000..dbb3c4a7
 --- /dev/null
 +++ b/tests/gtest/test_firewall_manager.cpp
-@@ -0,0 +1,672 @@
+@@ -0,0 +1,723 @@
 +/*
 + *    Copyright (c) 2026, The OpenThread Authors.
 + *    All rights reserved.
@@ -883,6 +877,7 @@ index 00000000..ebfca860
 +#endif
 +
 +using ::testing::_;
++using ::testing::AtLeast;
 +using ::testing::DoAll;
 +using ::testing::InSequence;
 +using ::testing::NiceMock;
@@ -891,11 +886,11 @@ index 00000000..ebfca860
 +using ::testing::StrEq;
 +
 +using otbr::Ip6Prefix;
++using otbr::Firewall::ChainPriority;
 +using otbr::Firewall::ChainType;
 +using otbr::Firewall::FirewallManager;
 +using otbr::Firewall::Hook;
 +using otbr::Firewall::INftables;
-+using otbr::Firewall::Ip6Net;
 +using otbr::Firewall::PktType;
 +using otbr::Firewall::SetDirection;
 +
@@ -918,10 +913,13 @@ index 00000000..ebfca860
 +    MOCK_METHOD(void, AbortBatch, (), (override));
 +    MOCK_METHOD(otbrError, DelTable, (const std::string &), (override));
 +    MOCK_METHOD(otbrError, AddTable, (const std::string &), (override));
-+    MOCK_METHOD(otbrError, AddChain, (const std::string &, const std::string &, Hook, int, ChainType), (override));
++    MOCK_METHOD(otbrError,
++                AddChain,
++                (const std::string &, const std::string &, Hook, ChainPriority, ChainType),
++                (override));
 +    MOCK_METHOD(otbrError, AddIp6PrefixSet, (const std::string &, const std::string &), (override));
-+    MOCK_METHOD(otbrError, AddSetElement, (const std::string &, const std::string &, const Ip6Net &), (override));
-+    MOCK_METHOD(otbrError, DelSetElement, (const std::string &, const std::string &, const Ip6Net &), (override));
++    MOCK_METHOD(otbrError, AddSetElement, (const std::string &, const std::string &, const Ip6Prefix &), (override));
++    MOCK_METHOD(otbrError, DelSetElement, (const std::string &, const std::string &, const Ip6Prefix &), (override));
 +    MOCK_METHOD(otbrError, FlushSet, (const std::string &, const std::string &), (override));
 +    MOCK_METHOD(otbrError,
 +                AddRuleOifnameNeqReturn,
@@ -940,10 +938,11 @@ index 00000000..ebfca860
 +                (const std::string &, const std::string &, const std::string &, SetDirection, Verdict, uint64_t *),
 +                (override));
 +    MOCK_METHOD(otbrError, AddRuleVerdict, (const std::string &, const std::string &, Verdict, uint64_t *), (override));
-+    MOCK_METHOD(otbrError,
-+                AddRuleNdNsRedirect,
-+                (const std::string &, const std::string &, const Ip6Net &, const std::string &, uint16_t, uint64_t *),
-+                (override));
++    MOCK_METHOD(
++        otbrError,
++        AddRuleNdNsRedirect,
++        (const std::string &, const std::string &, const Ip6Prefix &, const std::string &, uint16_t, uint64_t *),
++        (override));
 +    MOCK_METHOD(otbrError,
 +                AddRuleIifMark,
 +                (const std::string &, const std::string &, const std::string &, uint32_t, uint64_t *),
@@ -1076,7 +1075,7 @@ index 00000000..ebfca860
 +                    AddIp6PrefixSet(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kIngressAllowDstSet)))
 +            .Times(1);
 +        EXPECT_CALL(mock, AddChain(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kIngressChain),
-+                                   Hook::kForward, otbr::Firewall::kPriorityFilter, ChainType::kFilter))
++                                   Hook::kForward, ChainPriority::kFilter, ChainType::kFilter))
 +            .Times(1);
 +        EXPECT_CALL(mock, AddRuleOifnameNeqReturn(StrEq(FirewallManager::kTableName),
 +                                                  StrEq(FirewallManager::kIngressChain), StrEq("wpan0"), _))
@@ -1122,7 +1121,7 @@ index 00000000..ebfca860
 +    SetSuccessfulDefaults(mock);
 +
 +    EXPECT_CALL(mock, AddChain(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kPreroutingChain),
-+                               Hook::kPrerouting, otbr::Firewall::kPriorityRaw, ChainType::kFilter))
++                               Hook::kPrerouting, ChainPriority::kRaw, ChainType::kFilter))
 +        .Times(1);
 +    EXPECT_CALL(mock, AddRuleNdNsRedirect(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kPreroutingChain),
 +                                          _, StrEq("eth0"), 88, _))
@@ -1239,6 +1238,52 @@ index 00000000..ebfca860
 +    EXPECT_EQ(fw.FlushIngressSet(FirewallManager::IngressSet::kAllowDst), OTBR_ERROR_NONE);
 +}
 +
++TEST(FirewallManagerTest, ReplaceIngressPrefixesFlushesThenRefillsBothSets)
++{
++    NiceMock<MockNftables> mock;
++    SetSuccessfulDefaults(mock);
++
++    FirewallManager fw(mock, "wpan0");
++    ASSERT_EQ(fw.Init(), OTBR_ERROR_NONE);
++    ASSERT_EQ(fw.EnableIngressFilter(), OTBR_ERROR_NONE);
++
++    // The whole point of the flush-then-refill shape is that a prefix which
++    // fell out of the network data is gone afterwards, so the order matters:
++    // both flushes first, then the refills, all inside one batch.
++    {
++        InSequence seq;
++        EXPECT_CALL(mock, BeginBatch());
++        EXPECT_CALL(mock, FlushSet(_, StrEq(FirewallManager::kIngressDenySrcSet)));
++        EXPECT_CALL(mock, FlushSet(_, StrEq(FirewallManager::kIngressAllowDstSet)));
++        EXPECT_CALL(mock, AddSetElement(_, StrEq(FirewallManager::kIngressDenySrcSet), _)).Times(2);
++        EXPECT_CALL(mock, AddSetElement(_, StrEq(FirewallManager::kIngressAllowDstSet), _)).Times(1);
++        EXPECT_CALL(mock, CommitBatch());
++    }
++
++    std::vector<Ip6Prefix> denySrc  = {Ip6Prefix("2001:db8:1::", 64), Ip6Prefix("fd00::", 64)};
++    std::vector<Ip6Prefix> allowDst = {Ip6Prefix("2001:db8:1::", 64)};
++    EXPECT_EQ(fw.ReplaceIngressPrefixes(denySrc, allowDst), OTBR_ERROR_NONE);
++}
++
++TEST(FirewallManagerTest, ReplaceIngressPrefixesRejectsAnInvalidPrefix)
++{
++    NiceMock<MockNftables> mock;
++    SetSuccessfulDefaults(mock);
++
++    FirewallManager fw(mock, "wpan0");
++    ASSERT_EQ(fw.Init(), OTBR_ERROR_NONE);
++    ASSERT_EQ(fw.EnableIngressFilter(), OTBR_ERROR_NONE);
++
++    EXPECT_CALL(mock, CommitBatch()).Times(0);
++    EXPECT_CALL(mock, AbortBatch()).Times(AtLeast(1));
++
++    // A zero-length prefix is invalid; the whole update must be discarded
++    // rather than leaving the sets flushed but only partly refilled.
++    std::vector<Ip6Prefix> denySrc  = {Ip6Prefix("2001:db8::", 0)};
++    std::vector<Ip6Prefix> allowDst = {};
++    EXPECT_EQ(fw.ReplaceIngressPrefixes(denySrc, allowDst), OTBR_ERROR_INVALID_ARGS);
++}
++
 +TEST(FirewallManagerTest, FailedOperationAbortsTheBatch)
 +{
 +    // A failure between BeginBatch() and CommitBatch() must discard the batch,
@@ -1312,13 +1357,13 @@ index 00000000..ebfca860
 +    SetSuccessfulDefaults(mock);
 +
 +    EXPECT_CALL(mock, AddChain(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kNatPreroutingChain),
-+                               Hook::kPrerouting, otbr::Firewall::kPriorityMangle, ChainType::kFilter))
++                               Hook::kPrerouting, ChainPriority::kMangle, ChainType::kFilter))
 +        .Times(1);
 +    EXPECT_CALL(mock, AddChain(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kNatPostroutingChain),
-+                               Hook::kPostrouting, otbr::Firewall::kPrioritySrcNat, ChainType::kNat))
++                               Hook::kPostrouting, ChainPriority::kSrcNat, ChainType::kNat))
 +        .Times(1);
 +    EXPECT_CALL(mock, AddChain(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kNatForwardChain),
-+                               Hook::kForward, otbr::Firewall::kPriorityFilter, ChainType::kFilter))
++                               Hook::kForward, ChainPriority::kFilter, ChainType::kFilter))
 +        .Times(1);
 +
 +    EXPECT_CALL(mock, AddRuleIifMark(StrEq(FirewallManager::kTableName), StrEq(FirewallManager::kNatPreroutingChain),
@@ -1513,6 +1558,3 @@ index 00000000..ebfca860
 +}
 +
 +#endif // OTBR_ENABLE_NFTABLES
--- 
-2.55.0
-

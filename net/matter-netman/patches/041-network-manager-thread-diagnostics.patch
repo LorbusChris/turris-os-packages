@@ -1,4 +1,4 @@
-From 0869da022e34bffa5bd925f08fa00f93817c743c Mon Sep 17 00:00:00 2001
+From 11c40aa6ae2023a21f09cd8f636593246eef3694 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 04:01:10 +0200
 Subject: [PATCH] [network-manager] serve the Thread diagnostics otbr can
@@ -21,6 +21,8 @@ to describe.
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 02d06c764a4e2c6e45390a9e4858c3a19f762077)
+(cherry picked from commit 2f8e6b1d1e83fd2c0bf7d96973467e2f98d752fa)
 ---
  .../linux/ThreadDiagnosticsUbus.cpp           | 189 ++++++++++++++----
  .../linux/ThreadDiagnosticsUbus.h             |   4 +
@@ -306,6 +308,3 @@ index ddf463d7e6..3ce0951160 100644
  
      ubus::UbusManager & mUbusManager;
      ubus::UbusWatch mOtbr{ "otbr", this };
--- 
-2.55.0
-

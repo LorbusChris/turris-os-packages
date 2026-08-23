@@ -1,4 +1,4 @@
-From 6a6b37af66fc9f4efb8a7b4d72e75e6165d72034 Mon Sep 17 00:00:00 2001
+From 21f8a704b454bf95683d18a71904fbc631654984 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 8 Aug 2026 20:52:50 +0200
 Subject: [PATCH] [minmdns] do not lose every endpoint when one interface fails
@@ -48,6 +48,7 @@ that interface and the node advertises on the other one.
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 459a57ed836c2060ea06662359c1dea8650b55fc)
 ---
  src/lib/dnssd/minimal_mdns/Server.cpp | 79 +++++++++++++++++++++------
  1 file changed, 63 insertions(+), 16 deletions(-)
@@ -168,6 +169,3 @@ index f59f84926c..858c2d5af0 100644
          {
  #if !CHIP_DEVICE_LAYER_NONE
              chip::DeviceLayer::ChipDeviceEvent event{};
--- 
-2.55.0
-

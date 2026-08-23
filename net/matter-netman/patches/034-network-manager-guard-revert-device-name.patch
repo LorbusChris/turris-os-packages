@@ -1,4 +1,4 @@
-From aa524703d8785ffedc3d52cdf29a7e3d63fd8b92 Mon Sep 17 00:00:00 2001
+From 8fe1864461923fe02593ca3465d42e9119dc4661 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Tue, 28 Jul 2026 05:01:24 +0200
 Subject: [PATCH] [network-manager] guard revert and advertise the device name
@@ -179,6 +179,3 @@ index 71b853be2c..fb2ed7e32a 100644
  #define CHIP_DEVICE_CONFIG_DEVICE_PRODUCT_ID 0x8013
  
  // Sufficient space for ArlReviewEvent of several fabrics.
--- 
-2.55.0
-

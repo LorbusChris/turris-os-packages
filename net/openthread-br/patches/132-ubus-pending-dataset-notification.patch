@@ -1,4 +1,4 @@
-From 2c7325fb55042af4df1aaf1e7b89482bf0904ea5 Mon Sep 17 00:00:00 2001
+From 6771f251cc7b41246ec980fb101ecb7fc341f994 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:18:46 +0200
 Subject: [PATCH] [ubus] notify on pending dataset changes
@@ -15,7 +15,7 @@ otDatasetGetPendingTlvs() returns NOT_FOUND once a migration completes and
 the pending dataset has been consumed, which is not an error here but the
 signal that the switch has happened, so it is reported as an empty dataset.
 
-Assisted-By: Claude Opus 5
+(cherry picked from commit 8e70e2f510885fc74e0938bcccef39b72ca22501)
 ---
  src/host/thread_helper.cpp  | 37 +++++++++++++++++++++++++++++++++++++
  src/host/thread_helper.hpp  |  9 +++++++++
@@ -160,6 +160,3 @@ index 550a6ed4..c587010d 100644
  
      // === Internal helpers ===
  
--- 
-2.55.0
-

@@ -1,4 +1,4 @@
-From 3f29a5e59cf121722f5841b5e22b5aafce480558 Mon Sep 17 00:00:00 2001
+From 245450b4a69e30d3f8878177728b454e5b6e917f Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 04:00:27 +0200
 Subject: [PATCH] [network-manager] report the identity and Thread state the
@@ -36,13 +36,15 @@ different one.
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 914fb015da01ab630054eff8d8b6372f473c1c0b)
+(cherry picked from commit bd51a39b974814addb1a2e251fbd12ed5e6df72d)
 ---
  .../linux/NimInstanceInfo.cpp                 | 14 +++-
  .../linux/NimInstanceInfo.h                   |  4 +
  .../linux/ThreadBROpenThreadUbus.cpp          | 74 ++++++++++++++++++-
  .../linux/ThreadBROpenThreadUbus.h            | 13 ++++
- examples/network-manager-app/linux/main.cpp   | 26 +++++--
- 5 files changed, 117 insertions(+), 14 deletions(-)
+ examples/network-manager-app/linux/main.cpp   | 17 ++++-
+ 5 files changed, 112 insertions(+), 10 deletions(-)
 
 diff --git a/examples/network-manager-app/linux/NimInstanceInfo.cpp b/examples/network-manager-app/linux/NimInstanceInfo.cpp
 index b93c46a386..cb6933707b 100644
@@ -257,30 +259,20 @@ index c0e5ec498e..5983c0990c 100644
      Thread::OperationalDataset mPendingDataset;
      ActivateDatasetCallback * mActivateDatasetCallback = nullptr;
 diff --git a/examples/network-manager-app/linux/main.cpp b/examples/network-manager-app/linux/main.cpp
-index e7170d0f88..c4ec45e0e8 100644
+index 7ba5bfbacd..9d12370b7b 100644
 --- a/examples/network-manager-app/linux/main.cpp
 +++ b/examples/network-manager-app/linux/main.cpp
-@@ -67,14 +67,15 @@ bool gThreadManaged            = true;
- // and the identity the ethernet layers pick on this multi-homed host.
- const char * gPrimaryInterface = "br-lan";
- 
--constexpr uint16_t kOptionWifiNetwork = 0x1001;
--constexpr uint16_t kOptionWifiIface   = 0x1002;
--constexpr uint16_t kOptionNoWifiShare = 0x1003;
--constexpr uint16_t kOptionNoThread    = 0x1004;
-+constexpr uint16_t kOptionWifiNetwork  = 0x1001;
-+constexpr uint16_t kOptionWifiIface    = 0x1002;
-+constexpr uint16_t kOptionNoWifiShare  = 0x1003;
-+constexpr uint16_t kOptionNoThread     = 0x1004;
- constexpr uint16_t kOptionPrimaryIface = 0x1005;
- constexpr uint16_t kOptionVendorName   = 0x1006;
- constexpr uint16_t kOptionDiagIface    = 0x1007;
- constexpr uint16_t kOptionNoEthDiag    = 0x1008;
-+constexpr uint16_t kOptionProductName  = 0x1009;
+@@ -55,7 +55,8 @@ constexpr int kOptionPrimaryIface = 0x1002;
+ constexpr int kOptionVendorName   = 0x1003;
+ constexpr int kOptionDiagIface    = 0x1004;
+ constexpr int kOptionNoEthDiag    = 0x1005;
+-static_assert(kOptionNoEthDiag < NimBackend::kFirstOptionId, "option identifiers collide with the backend's");
++constexpr int kOptionProductName  = 0x1006;
++static_assert(kOptionProductName < NimBackend::kFirstOptionId, "option identifiers collide with the backend's");
  
  bool HandleAppOption(const char * program, ArgParser::OptionSet * options, int identifier, const char * name, const char * value)
  {
-@@ -100,6 +101,9 @@ bool HandleAppOption(const char * program, ArgParser::OptionSet * options, int i
+@@ -70,6 +71,9 @@ bool HandleAppOption(const char * program, ArgParser::OptionSet * options, int i
      case kOptionVendorName:
          NimInstanceInfoProvider::Instance().SetVendorName(value);
          return true;
@@ -290,7 +282,7 @@ index e7170d0f88..c4ec45e0e8 100644
      case kOptionDiagIface:
          NimDiagnosticsProvider::Instance().SetDiagnosticsInterface(value);
          return true;
-@@ -118,6 +122,7 @@ ArgParser::OptionDef sAppOptionDefs[] = {
+@@ -85,6 +89,7 @@ const ArgParser::OptionDef sCommonOptionDefs[] = {
      { "no-thread", ArgParser::kNoArgument, kOptionNoThread },
      { "primary-interface", ArgParser::kArgumentRequired, kOptionPrimaryIface },
      { "vendor-name", ArgParser::kArgumentRequired, kOptionVendorName },
@@ -298,40 +290,34 @@ index e7170d0f88..c4ec45e0e8 100644
      { "diagnostics-interface", ArgParser::kArgumentRequired, kOptionDiagIface },
      { "no-ethernet-diagnostics", ArgParser::kNoArgument, kOptionNoEthDiag },
      {},
-@@ -139,6 +144,9 @@ const char sAppOptionHelp[] = "  --wifi-network <name>\n"
-                               "  --vendor-name <name>\n"
-                               "       Manufacturer reported in Basic Information, overriding the\n"
-                               "       one the firmware states in /etc/os-release.\n"
-+                              "  --product-name <name>\n"
-+                              "       Product reported in Basic Information, overriding the\n"
-+                              "       distribution name from /etc/os-release.\n"
-                               "  --diagnostics-interface <name>\n"
-                               "       Feed the Ethernet diagnostics from this interface instead of\n"
-                               "       the primary one.\n"
-@@ -211,6 +219,7 @@ static void ApplicationEarlyInit()
- {
- #if MATTER_ENABLE_UBUS
-     NimDiagnosticsProvider::Instance().SetPrimaryInterface(gPrimaryInterface);
-+    NimDiagnosticsProvider::Instance().Init();
-     DeviceLayer::SetDiagnosticDataProvider(&NimDiagnosticsProvider::Instance());
-     NimInstanceInfoProvider::Instance().Init();
- #endif
-@@ -338,9 +347,12 @@ void ApplicationShutdown()
- int main(int argc, char * argv[])
- {
- #if MATTER_ENABLE_UBUS
--    // Must be in place before the stack caches its ethernet interface;
--    // --primary-interface overrides it during argument parsing.
--    setenv("CHIP_ETHERNET_INTERFACE", gPrimaryInterface, 0);
-+    // Must be in place before the stack caches its ethernet interface.
-+    // Overwritten rather than defaulted: the diagnostics this node reports
-+    // are taken from gPrimaryInterface, and an interface inherited from the
-+    // environment would make the platform describe a different one.
-+    // --primary-interface sets both, during argument parsing.
-+    setenv("CHIP_ETHERNET_INTERFACE", gPrimaryInterface, 1);
+@@ -98,6 +103,9 @@ const char sCommonOptionHelp[] = "  --no-thread\n"
+                                  "  --vendor-name <name>\n"
+                                  "       Manufacturer reported in Basic Information, overriding the\n"
+                                  "       one the firmware states in /etc/os-release.\n"
++                                 "  --product-name <name>\n"
++                                 "       Product reported in Basic Information, overriding the\n"
++                                 "       distribution name from /etc/os-release.\n"
+                                  "  --diagnostics-interface <name>\n"
+                                  "       Feed the Ethernet diagnostics from this interface instead of\n"
+                                  "       the primary one.\n"
+@@ -292,7 +300,10 @@ int main(int argc, char * argv[])
+ 
+     // The parser runs inside ChipLinuxAppInit, after which the stack has
+     // already cached its ethernet interface, so the command line is scanned
+-    // for the primary interface ahead of it.
++    // for the primary interface ahead of it. Overwritten rather than
++    // defaulted: the diagnostics this node reports are taken from
++    // gPrimaryInterface, and an interface inherited from the environment
++    // would make the platform describe a different one.
+     for (int i = 1; i + 1 < argc; i++)
+     {
+         if (strcmp(argv[i], "--primary-interface") == 0)
+@@ -302,7 +313,7 @@ int main(int argc, char * argv[])
+     }
+     if (gPrimaryInterface != nullptr)
+     {
+-        setenv("CHIP_ETHERNET_INTERFACE", gPrimaryInterface, 0);
++        setenv("CHIP_ETHERNET_INTERFACE", gPrimaryInterface, 1);
+     }
+ 
      VerifyOrReturnValue(ChipLinuxAppInit(argc, argv, &sAppOptions) == 0, -1);
- #else
-     VerifyOrReturnValue(ChipLinuxAppInit(argc, argv) == 0, -1);
--- 
-2.55.0
-

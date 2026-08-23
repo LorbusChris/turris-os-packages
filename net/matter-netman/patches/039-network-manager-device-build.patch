@@ -1,4 +1,4 @@
-From 4a7edf5c23577f2dfb23ca9188f0f859cf2419a7 Mon Sep 17 00:00:00 2001
+From fea602f83ab18411190568c6166ddd588eb7a618 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 04:00:27 +0200
 Subject: [PATCH] [network-manager] build this example as the device it ships
@@ -18,30 +18,17 @@ Also list the two headers that were missing from the ubus sources.
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit e46a05b874b18875a370667580715f9546ab78d1)
+(cherry picked from commit c03eff01d9bf29191c492233dcab1e564d5e42a9)
 ---
- examples/network-manager-app/linux/BUILD.gn         |  2 ++
  .../linux/include/CHIPProjectAppConfig.h            | 13 +++++++++++++
- 2 files changed, 15 insertions(+)
+ 1 file changed, 13 insertions(+)
 
-diff --git a/examples/network-manager-app/linux/BUILD.gn b/examples/network-manager-app/linux/BUILD.gn
-index 5d854c9dc7..1b7870b366 100644
---- a/examples/network-manager-app/linux/BUILD.gn
-+++ b/examples/network-manager-app/linux/BUILD.gn
-@@ -41,7 +41,9 @@ executable("matter-network-manager-app") {
-     sources += [
-       "MatterUbusService.cpp",
-       "NimDiagnostics.cpp",
-+      "NimDiagnostics.h",
-       "NimInstanceInfo.cpp",
-+      "NimInstanceInfo.h",
-       "MatterUbusService.h",
-       "ThreadBROpenThreadUbus.cpp",
-       "ThreadBROpenThreadUbus.h",
 diff --git a/examples/network-manager-app/linux/include/CHIPProjectAppConfig.h b/examples/network-manager-app/linux/include/CHIPProjectAppConfig.h
-index fb2ed7e32a..ea4ced6260 100644
+index 40db276cd0..b0d488533c 100644
 --- a/examples/network-manager-app/linux/include/CHIPProjectAppConfig.h
 +++ b/examples/network-manager-app/linux/include/CHIPProjectAppConfig.h
-@@ -29,6 +29,19 @@
+@@ -29,5 +29,18 @@
  // Sufficient space for ArlReviewEvent of several fabrics.
  #define CHIP_DEVICE_CONFIG_EVENT_LOGGING_INFO_BUFFER_SIZE (32 * 1024)
  
@@ -58,9 +45,5 @@ index fb2ed7e32a..ea4ced6260 100644
 +// the wire where the specification requires CONSTRAINT_ERROR.
 +#define CONFIG_BUILD_FOR_HOST_UNIT_TEST 0
 +
- #ifndef MATTER_ENABLE_UBUS
- #define MATTER_ENABLE_UBUS 0
- #endif
--- 
-2.55.0
-
+ // Inherit defaults from config/standalone/CHIPProjectConfig.h
+ #include <CHIPProjectConfig.h>

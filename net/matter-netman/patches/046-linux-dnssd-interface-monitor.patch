@@ -1,4 +1,4 @@
-From 702b89203d62c451c9de57358d62d63e8f5d5d27 Mon Sep 17 00:00:00 2001
+From c9785b50bc76951ba31daa0025d51cd286815cab Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 8 Aug 2026 22:08:34 +0200
 Subject: [PATCH] [linux] restart DNS-SD when the network interfaces change
@@ -59,6 +59,7 @@ this change.)
 
 Assisted-By: Claude Opus 5
 Signed-off-by: Christian Glombek <c.glombek@cosa.systems>
+(cherry picked from commit 9b56d3084878faf08aea96dabbd21bbfeeada301)
 ---
  src/platform/BUILD.gn                        |   6 +
  src/platform/Linux/BUILD.gn                  |  15 +-
@@ -490,7 +491,7 @@ index 0000000000..713be97906
 +} // namespace DeviceLayer
 +} // namespace chip
 diff --git a/src/platform/Linux/PlatformManagerImpl.cpp b/src/platform/Linux/PlatformManagerImpl.cpp
-index 5b43bbfdf0..893877d1e7 100644
+index 4fc530a4aa..86dc3d2dec 100644
 --- a/src/platform/Linux/PlatformManagerImpl.cpp
 +++ b/src/platform/Linux/PlatformManagerImpl.cpp
 @@ -254,11 +254,28 @@ CHIP_ERROR PlatformManagerImpl::_InitChipStack()
@@ -548,6 +549,3 @@ index d50687bf43..eb89d620ed 100644
      static PlatformManagerImpl sInstance;
  
  #if CHIP_DEVICE_CONFIG_WITH_GLIB_MAIN_LOOP
--- 
-2.55.0
-

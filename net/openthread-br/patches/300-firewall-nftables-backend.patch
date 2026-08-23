@@ -1,4 +1,4 @@
-From b623ad3ce52b4ef664ea8bfe384367dfdbe9d1d6 Mon Sep 17 00:00:00 2001
+From b525f71ad9310423fefe024b7477c1ceaed1e0f1 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Fri, 24 Jul 2026 15:42:58 +0200
 Subject: [PATCH] [firewall] add INftables interface and libnftnl/libmnl
@@ -20,17 +20,17 @@ Building with -DOTBR_NFTABLES=ON requires libnftnl and libmnl.
 The interval-set encoding and atomic flush-and-refill batches were
 validated against live kernels (6.8 and 7.1, nftables 1.0.9/1.1.6).
 
-Assisted-By: Claude Fable 5
+(cherry picked from commit 6c3caacd1b102730a71a20f0f91cf774cc895b01)
 ---
- etc/cmake/options.cmake         |   13 +
+ etc/cmake/options.cmake         |   16 +
  src/CMakeLists.txt              |    4 +
- src/firewall/CMakeLists.txt     |   56 ++
+ src/firewall/CMakeLists.txt     |   49 ++
  src/firewall/netlink_socket.cpp |  151 ++++
  src/firewall/netlink_socket.hpp |  130 ++++
- src/firewall/nftables.hpp       |  285 +++++++
- src/firewall/nftables_impl.cpp  | 1262 +++++++++++++++++++++++++++++++
+ src/firewall/nftables.hpp       |  275 +++++++
+ src/firewall/nftables_impl.cpp  | 1273 +++++++++++++++++++++++++++++++
  src/firewall/nftables_impl.hpp  |  190 +++++
- 8 files changed, 2091 insertions(+)
+ 8 files changed, 2088 insertions(+)
  create mode 100644 src/firewall/CMakeLists.txt
  create mode 100644 src/firewall/netlink_socket.cpp
  create mode 100644 src/firewall/netlink_socket.hpp
@@ -39,10 +39,10 @@ Assisted-By: Claude Fable 5
  create mode 100644 src/firewall/nftables_impl.hpp
 
 diff --git a/etc/cmake/options.cmake b/etc/cmake/options.cmake
-index b88485b0..1d662cab 100644
+index b88485b0..dc1faffa 100644
 --- a/etc/cmake/options.cmake
 +++ b/etc/cmake/options.cmake
-@@ -86,6 +86,19 @@ if (OTBR_TELEMETRY_DATA_API)
+@@ -86,6 +86,22 @@ if (OTBR_TELEMETRY_DATA_API)
      target_compile_definitions(otbr-config INTERFACE OTBR_ENABLE_TELEMETRY_DATA_API=1)
  endif()
  
@@ -52,8 +52,11 @@ index b88485b0..1d662cab 100644
 +# support at runtime.
 +option(OTBR_NFTABLES "Enable in-process nftables firewall backend (libnftnl/libmnl)" OFF)
 +if (OTBR_NFTABLES)
-+    pkg_check_modules(LIBNFTNL REQUIRED libnftnl)
-+    pkg_check_modules(LIBMNL REQUIRED libmnl)
++    if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
++        message(FATAL_ERROR "OTBR_NFTABLES is only supported on Linux")
++    endif()
++    pkg_check_modules(LIBNFTNL REQUIRED IMPORTED_TARGET libnftnl)
++    pkg_check_modules(LIBMNL REQUIRED IMPORTED_TARGET libmnl)
 +    target_compile_definitions(otbr-config INTERFACE OTBR_ENABLE_NFTABLES=1)
 +else()
 +    target_compile_definitions(otbr-config INTERFACE OTBR_ENABLE_NFTABLES=0)
@@ -79,10 +82,10 @@ index 930d8363..cf358253 100644
  endif()
 diff --git a/src/firewall/CMakeLists.txt b/src/firewall/CMakeLists.txt
 new file mode 100644
-index 00000000..78aeefcf
+index 00000000..e2d6f0d1
 --- /dev/null
 +++ b/src/firewall/CMakeLists.txt
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,49 @@
 +#
 +#  Copyright (c) 2026, The OpenThread Authors.
 +#  All rights reserved.
@@ -127,16 +130,9 @@ index 00000000..78aeefcf
 +)
 +
 +if(OTBR_NFTABLES)
-+    target_include_directories(otbr-firewall PRIVATE
-+        ${LIBNFTNL_INCLUDE_DIRS}
-+        ${LIBMNL_INCLUDE_DIRS}
-+    )
-+
 +    target_link_libraries(otbr-firewall PRIVATE
-+        $<$<BOOL:${LIBNFTNL_LIBRARY_DIRS}>:-L$<JOIN:${LIBNFTNL_LIBRARY_DIRS}," -L">>
-+        $<$<BOOL:${LIBMNL_LIBRARY_DIRS}>:-L$<JOIN:${LIBMNL_LIBRARY_DIRS}," -L">>
-+        ${LIBNFTNL_LIBRARIES}
-+        ${LIBMNL_LIBRARIES}
++        PkgConfig::LIBNFTNL
++        PkgConfig::LIBMNL
 +    )
 +endif()
 diff --git a/src/firewall/netlink_socket.cpp b/src/firewall/netlink_socket.cpp
@@ -434,10 +430,10 @@ index 00000000..e2353f90
 +#endif // OTBR_FIREWALL_NETLINK_SOCKET_HPP_
 diff --git a/src/firewall/nftables.hpp b/src/firewall/nftables.hpp
 new file mode 100644
-index 00000000..778ba7d1
+index 00000000..cfcae59a
 --- /dev/null
 +++ b/src/firewall/nftables.hpp
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,275 @@
 +/*
 + *    Copyright (c) 2026, The OpenThread Authors.
 + *    All rights reserved.
@@ -525,22 +521,12 @@ index 00000000..778ba7d1
 + * libnftnl docs). Listed here so callers don't have to pull kernel
 + * headers.
 + */
-+enum ChainPriority
++enum class ChainPriority : int
 +{
-+    kPriorityRaw    = -300,
-+    kPriorityMangle = -150,
-+    kPriorityFilter = 0,
-+    kPrioritySrcNat = 100,
-+};
-+
-+/**
-+ * An IPv6 prefix in wire format. Used for set elements and for the
-+ * domain-prefix match in the ND-proxy redirect rule.
-+ */
-+struct Ip6Net
-+{
-+    uint8_t mAddr[16];
-+    uint8_t mPrefixLen;
++    kRaw    = -300,
++    kMangle = -150,
++    kFilter = 0,
++    kSrcNat = 100,
 +};
 +
 +/**
@@ -603,7 +589,7 @@ index 00000000..778ba7d1
 +    virtual otbrError AddChain(const std::string &aTable,
 +                               const std::string &aChain,
 +                               Hook               aHook,
-+                               int                aPriority,
++                               ChainPriority      aPriority,
 +                               ChainType          aType = ChainType::kFilter) = 0;
 +
 +    /**
@@ -612,9 +598,9 @@ index 00000000..778ba7d1
 +     */
 +    virtual otbrError AddIp6PrefixSet(const std::string &aTable, const std::string &aSet) = 0;
 +
-+    virtual otbrError AddSetElement(const std::string &aTable, const std::string &aSet, const Ip6Net &aPrefix) = 0;
-+    virtual otbrError DelSetElement(const std::string &aTable, const std::string &aSet, const Ip6Net &aPrefix) = 0;
-+    virtual otbrError FlushSet(const std::string &aTable, const std::string &aSet)                             = 0;
++    virtual otbrError AddSetElement(const std::string &aTable, const std::string &aSet, const Ip6Prefix &aPrefix) = 0;
++    virtual otbrError DelSetElement(const std::string &aTable, const std::string &aSet, const Ip6Prefix &aPrefix) = 0;
++    virtual otbrError FlushSet(const std::string &aTable, const std::string &aSet)                                = 0;
 +
 +    /**
 +     * `meta oifname != <ifname> return` — used as the first rule of an
@@ -672,7 +658,7 @@ index 00000000..778ba7d1
 +     */
 +    virtual otbrError AddRuleNdNsRedirect(const std::string &aTable,
 +                                          const std::string &aChain,
-+                                          const Ip6Net      &aDaddrPrefix,
++                                          const Ip6Prefix   &aDaddrPrefix,
 +                                          const std::string &aIifname,
 +                                          uint16_t           aQueueNum,
 +                                          uint64_t          *aHandleOut) = 0;
@@ -725,10 +711,10 @@ index 00000000..778ba7d1
 +#endif // OTBR_FIREWALL_NFTABLES_HPP_
 diff --git a/src/firewall/nftables_impl.cpp b/src/firewall/nftables_impl.cpp
 new file mode 100644
-index 00000000..0b56ed2a
+index 00000000..80133e88
 --- /dev/null
 +++ b/src/firewall/nftables_impl.cpp
-@@ -0,0 +1,1262 @@
+@@ -0,0 +1,1273 @@
 +/*
 + *    Copyright (c) 2026, The OpenThread Authors.
 + *    All rights reserved.
@@ -775,6 +761,7 @@ index 00000000..0b56ed2a
 +
 +#include <linux/netfilter.h>
 +#include <linux/netfilter/nf_tables.h>
++#include <linux/netfilter/nfnetlink.h>
 +#include <linux/netlink.h>
 +
 +#include <libmnl/libmnl.h>
@@ -951,20 +938,28 @@ index 00000000..0b56ed2a
 +    Nftables *self = static_cast<Nftables *>(aContext);
 +
 +    // ECHO replies for NFT_MSG_NEWRULE carry the kernel-assigned handle.
-+    if ((aNlh->nlmsg_type & 0xff) == NFT_MSG_NEWRULE)
++    if (NFNL_MSG_TYPE(aNlh->nlmsg_type) == NFT_MSG_NEWRULE)
 +    {
 +        auto it = self->mPendingHandles.find(aNlh->nlmsg_seq);
 +        if (it != self->mPendingHandles.end() && it->second != nullptr)
 +        {
 +            struct nftnl_rule *r = nftnl_rule_alloc();
-+            if (r != nullptr && nftnl_rule_nlmsg_parse(aNlh, r) >= 0)
++
++            // The caller keeps the handle to delete the rule later. Failing to
++            // learn it must fail the commit: reporting success would leave the
++            // rule installed but unaddressable, so it could never be removed.
++            if (r == nullptr || nftnl_rule_nlmsg_parse(aNlh, r) < 0)
 +            {
-+                *it->second = nftnl_rule_get_u64(r, NFTNL_RULE_HANDLE);
++                if (r != nullptr)
++                {
++                    nftnl_rule_free(r);
++                }
++                errno = EBADMSG;
++                return MNL_CB_ERROR;
 +            }
-+            if (r != nullptr)
-+            {
-+                nftnl_rule_free(r);
-+            }
++
++            *it->second = nftnl_rule_get_u64(r, NFTNL_RULE_HANDLE);
++            nftnl_rule_free(r);
 +        }
 +    }
 +    return MNL_CB_OK;
@@ -998,9 +993,8 @@ index 00000000..0b56ed2a
 +    }
 +
 +    {
-+        struct nlmsghdr *nlh =
-+            nftnl_table_nlmsg_build_hdr(reinterpret_cast<char *>(mnl_nlmsg_batch_current(mBatch)), NFT_MSG_DELTABLE,
-+                                        NFPROTO_INET, NLM_F_ACK, mSeq++);
++        struct nlmsghdr *nlh = nftnl_table_nlmsg_build_hdr(reinterpret_cast<char *>(mnl_nlmsg_batch_current(mBatch)),
++                                                           NFT_MSG_DELTABLE, NFPROTO_INET, NLM_F_ACK, mSeq++);
 +        nftnl_table_nlmsg_build_payload(nlh, t);
 +        SuccessOrExit(error = AdvanceBatch());
 +    }
@@ -1077,7 +1071,7 @@ index 00000000..0b56ed2a
 +otbrError Nftables::AddChain(const std::string &aTable,
 +                             const std::string &aChain,
 +                             Hook               aHook,
-+                             int                aPriority,
++                             ChainPriority      aPriority,
 +                             ChainType          aType)
 +{
 +    otbrError           error = OTBR_ERROR_NONE;
@@ -1092,7 +1086,7 @@ index 00000000..0b56ed2a
 +    nftnl_chain_set_str(c, NFTNL_CHAIN_NAME, aChain.c_str());
 +    nftnl_chain_set_u32(c, NFTNL_CHAIN_FAMILY, NFPROTO_INET);
 +    nftnl_chain_set_u32(c, NFTNL_CHAIN_HOOKNUM, HookToHooknum(aHook));
-+    nftnl_chain_set_s32(c, NFTNL_CHAIN_PRIO, aPriority);
++    nftnl_chain_set_s32(c, NFTNL_CHAIN_PRIO, static_cast<int32_t>(aPriority));
 +    nftnl_chain_set_str(c, NFTNL_CHAIN_TYPE, ChainTypeToString(aType));
 +
 +    {
@@ -1204,7 +1198,7 @@ index 00000000..0b56ed2a
 +// Build the start/end pair for a prefix interval and attach them to @p aSet.
 +// The end element carries NFT_SET_ELEM_INTERVAL_END to mark it as the
 +// (exclusive) upper bound.
-+otbrError AttachPrefixInterval(struct nftnl_set *aSet, const Ip6Net &aPrefix)
++otbrError AttachPrefixInterval(struct nftnl_set *aSet, const Ip6Prefix &aPrefix)
 +{
 +    otbrError              error = OTBR_ERROR_NONE;
 +    struct nftnl_set_elem *startElem;
@@ -1214,13 +1208,13 @@ index 00000000..0b56ed2a
 +
 +    // Callers validate this, but an out-of-range length would silently produce a
 +    // wrong interval here rather than a diagnosable failure, so reject it.
-+    VerifyOrExit(aPrefix.mPrefixLen <= 128, error = OTBR_ERROR_INVALID_ARGS);
++    VerifyOrExit(aPrefix.mLength <= 128, error = OTBR_ERROR_INVALID_ARGS);
 +
-+    memcpy(startAddr, aPrefix.mAddr, 16);
++    memcpy(startAddr, aPrefix.mPrefix.m8, 16);
 +    // Zero the host bits so the start element is prefix-aligned.
-+    ApplyPrefixMask(startAddr, aPrefix.mPrefixLen);
++    ApplyPrefixMask(startAddr, aPrefix.mLength);
 +    memcpy(endAddr, startAddr, 16);
-+    AddPrefixIncrement(endAddr, aPrefix.mPrefixLen);
++    AddPrefixIncrement(endAddr, aPrefix.mLength);
 +
 +    startElem = nftnl_set_elem_alloc();
 +    VerifyOrExit(startElem != nullptr, error = OTBR_ERROR_ERRNO);
@@ -1239,7 +1233,7 @@ index 00000000..0b56ed2a
 +
 +} // namespace
 +
-+otbrError Nftables::AddSetElement(const std::string &aTable, const std::string &aSet, const Ip6Net &aPrefix)
++otbrError Nftables::AddSetElement(const std::string &aTable, const std::string &aSet, const Ip6Prefix &aPrefix)
 +{
 +    otbrError         error = OTBR_ERROR_NONE;
 +    struct nftnl_set *s     = nullptr;
@@ -1271,7 +1265,7 @@ index 00000000..0b56ed2a
 +    return error;
 +}
 +
-+otbrError Nftables::DelSetElement(const std::string &aTable, const std::string &aSet, const Ip6Net &aPrefix)
++otbrError Nftables::DelSetElement(const std::string &aTable, const std::string &aSet, const Ip6Prefix &aPrefix)
 +{
 +    otbrError         error = OTBR_ERROR_NONE;
 +    struct nftnl_set *s     = nullptr;
@@ -1536,9 +1530,12 @@ index 00000000..0b56ed2a
 +
 +otbrError Nftables::QueueNewRule(struct nftnl_rule *aRule, uint64_t *aHandleOut)
 +{
-+    struct nlmsghdr *nlh =
-+        nftnl_rule_nlmsg_build_hdr(reinterpret_cast<char *>(mnl_nlmsg_batch_current(mBatch)), NFT_MSG_NEWRULE,
-+                                   NFPROTO_INET, NLM_F_APPEND | NLM_F_CREATE | NLM_F_ECHO | NLM_F_ACK, mSeq);
++    // The echo reply is what carries the kernel-assigned handle back, so it is
++    // only requested when the caller wants the handle; for static rules it
++    // would be generated and then thrown away.
++    const uint16_t   flags = NLM_F_APPEND | NLM_F_CREATE | NLM_F_ACK | ((aHandleOut != nullptr) ? NLM_F_ECHO : 0);
++    struct nlmsghdr *nlh   = nftnl_rule_nlmsg_build_hdr(reinterpret_cast<char *>(mnl_nlmsg_batch_current(mBatch)),
++                                                        NFT_MSG_NEWRULE, NFPROTO_INET, flags, mSeq);
 +    nftnl_rule_nlmsg_build_payload(nlh, aRule);
 +
 +    if (aHandleOut != nullptr)
@@ -1552,7 +1549,7 @@ index 00000000..0b56ed2a
 +
 +otbrError Nftables::AddRuleNdNsRedirect(const std::string &aTable,
 +                                        const std::string &aChain,
-+                                        const Ip6Net      &aDaddrPrefix,
++                                        const Ip6Prefix   &aDaddrPrefix,
 +                                        const std::string &aIifname,
 +                                        uint16_t           aQueueNum,
 +                                        uint64_t          *aHandleOut)
@@ -1569,9 +1566,9 @@ index 00000000..0b56ed2a
 +    VerifyOrExit(mInBatch, error = OTBR_ERROR_INVALID_STATE);
 +    VerifyOrExit(aIifname.size() < IFNAMSIZ, error = OTBR_ERROR_INVALID_ARGS);
 +
-+    memcpy(maskedAddr, aDaddrPrefix.mAddr, sizeof(maskedAddr));
-+    ApplyPrefixMask(maskedAddr, aDaddrPrefix.mPrefixLen);
-+    ComputePrefixMask(mask, aDaddrPrefix.mPrefixLen);
++    memcpy(maskedAddr, aDaddrPrefix.mPrefix.m8, sizeof(maskedAddr));
++    ApplyPrefixMask(maskedAddr, aDaddrPrefix.mLength);
++    ComputePrefixMask(mask, aDaddrPrefix.mLength);
 +
 +    IfNameToWire(aIifname, iifBuf);
 +
@@ -1590,7 +1587,7 @@ index 00000000..0b56ed2a
 +    // optionally bitwise-AND with the prefix mask, then compare against the
 +    // prefix-aligned address.
 +    SuccessOrExit(error = AddExpr(rule, MakePayloadLoad(NFT_PAYLOAD_NETWORK_HEADER, 24, 16, NFT_REG_1)));
-+    if (aDaddrPrefix.mPrefixLen < 128)
++    if (aDaddrPrefix.mLength < 128)
 +    {
 +        SuccessOrExit(error = AddExpr(rule, MakeBitwiseMask(NFT_REG_1, mask, 16)));
 +    }
@@ -1993,7 +1990,7 @@ index 00000000..0b56ed2a
 +#endif // OTBR_ENABLE_NFTABLES
 diff --git a/src/firewall/nftables_impl.hpp b/src/firewall/nftables_impl.hpp
 new file mode 100644
-index 00000000..9c9c8d57
+index 00000000..eadf2318
 --- /dev/null
 +++ b/src/firewall/nftables_impl.hpp
 @@ -0,0 +1,190 @@
@@ -2090,12 +2087,12 @@ index 00000000..9c9c8d57
 +    otbrError AddChain(const std::string &aTable,
 +                       const std::string &aChain,
 +                       Hook               aHook,
-+                       int                aPriority,
++                       ChainPriority      aPriority,
 +                       ChainType          aType) override;
 +    otbrError AddIp6PrefixSet(const std::string &aTable, const std::string &aSet) override;
 +
-+    otbrError AddSetElement(const std::string &aTable, const std::string &aSet, const Ip6Net &aPrefix) override;
-+    otbrError DelSetElement(const std::string &aTable, const std::string &aSet, const Ip6Net &aPrefix) override;
++    otbrError AddSetElement(const std::string &aTable, const std::string &aSet, const Ip6Prefix &aPrefix) override;
++    otbrError DelSetElement(const std::string &aTable, const std::string &aSet, const Ip6Prefix &aPrefix) override;
 +    otbrError FlushSet(const std::string &aTable, const std::string &aSet) override;
 +
 +    otbrError AddRuleOifnameNeqReturn(const std::string &aTable,
@@ -2125,7 +2122,7 @@ index 00000000..9c9c8d57
 +                             uint64_t          *aHandleOut) override;
 +    otbrError AddRuleNdNsRedirect(const std::string &aTable,
 +                                  const std::string &aChain,
-+                                  const Ip6Net      &aDaddrPrefix,
++                                  const Ip6Prefix   &aDaddrPrefix,
 +                                  const std::string &aIifname,
 +                                  uint16_t           aQueueNum,
 +                                  uint64_t          *aHandleOut) override;
@@ -2187,6 +2184,3 @@ index 00000000..9c9c8d57
 +#endif // OTBR_ENABLE_NFTABLES
 +
 +#endif // OTBR_FIREWALL_NFTABLES_IMPL_HPP_
--- 
-2.55.0
-
