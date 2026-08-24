@@ -1,4 +1,4 @@
-From f8708b4aaff2a3f7270f704c173893a65519edc0 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:30:02 +0200
 Subject: [PATCH] [ubus] add a deprovision method
@@ -15,8 +15,6 @@ NcpHost.
 This is what the Thread Border Router Management cluster needs for
 RevertActiveDataset(), which runs when a fail-safe expires after a dataset
 was set but never committed.
-
-(cherry picked from commit 7388b5720f1ef0cc4235e570434073e451d593ee)
 ---
  src/openwrt/ubus/otubus.cpp | 10 ++++++++++
  src/openwrt/ubus/otubus.hpp |  1 +

@@ -1,4 +1,4 @@
-From db5bc4a97a8e730723501f19e2a3498afb9328fe Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Mon, 27 Jul 2026 07:13:48 +0200
 Subject: [PATCH] [ubus] provision through the host abstraction
@@ -27,8 +27,6 @@ synchronously.
 
 The guard against reprovisioning now reads GetDeviceRole() rather than
 Ip6IsEnabled(), which is not implemented under NCP.
-
-(cherry picked from commit f0c3eeb64cbb031f412ccb1ce5cf6617b4e4e046)
 ---
  src/openwrt/ubus/otubus.cpp | 56 ++++++++++++++++++++++++++++++++++---
  src/openwrt/ubus/otubus.hpp |  9 ++++++

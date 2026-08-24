@@ -1,4 +1,4 @@
-From b502011ab6f23adc5719280538da388da029a7b7 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Karsten Sperling <ksperling@apple.com>
 Date: Fri, 3 Oct 2025 17:29:54 +1300
 Subject: [PATCH] Ubus: Use blobmsg_printf instead of sprintf with explicit
@@ -9,7 +9,7 @@ Subject: [PATCH] Ubus: Use blobmsg_printf instead of sprintf with explicit
  1 file changed, 12 insertions(+), 37 deletions(-)
 
 diff --git a/src/openwrt/ubus/otubus.cpp b/src/openwrt/ubus/otubus.cpp
-index 78860e40..05b7cf99 100644
+index 2123cdf9..4a641e93 100644
 --- a/src/openwrt/ubus/otubus.cpp
 +++ b/src/openwrt/ubus/otubus.cpp
 @@ -50,7 +50,6 @@ namespace ubus {
@@ -151,6 +151,3 @@ index 78860e40..05b7cf99 100644
  
                  mode = (entry.mMode.mRxOnWhenIdle ? kModeRxOnWhenIdle : 0) |
                         (entry.mMode.mDeviceType ? kModeFullThreadDevice : 0) |
--- 
-2.55.0
-
