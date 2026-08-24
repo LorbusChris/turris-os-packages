@@ -1,4 +1,4 @@
-From 944beb65402078e867c7397ed21a6ff933deab85 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Karsten Sperling <ksperling@apple.com>
 Date: Fri, 3 Oct 2025 22:13:18 +1300
 Subject: [PATCH] Ubus: Miscellaneous tweaks
@@ -775,6 +775,3 @@ index bda458b3..676a10b9 100644
  
      blob_buf mBuf{}; // default buffer for sync responses
  
--- 
-2.55.0
-

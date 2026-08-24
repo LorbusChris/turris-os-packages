@@ -4,13 +4,13 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openthread-br
-PKG_VERSION:=2026.08.0
+PKG_VERSION:=2026.09.0
 PKG_SOURCE_VERSION:=v$(PKG_VERSION)
-PKG_RELEASE:=4
+PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=https://github.com/openthread/ot-br-posix.git
-PKG_MIRROR_HASH:=4645fefcf89d0c06de87bbfa9e52e2a522de48fa52146427669323c894405eb9
+PKG_MIRROR_HASH:=d0c82691b95e0aa2112ca08f6ff544c23794eae632c8c01b040616a0d60f5aab
 
 PKG_MAINTAINER:=Stijn Tintel <stijn@linux-ipv6.be>
 PKG_LICENSE:=BSD-3-Clause
@@ -77,8 +77,11 @@ define Package/openthread-br/install
 		$(1)/etc/uci-defaults \
 		$(1)/lib/netifd/proto \
 		$(1)/usr/libexec/openthread \
-		$(1)/usr/sbin
+		$(1)/usr/sbin \
+		$(1)/usr/share/otbr
 	$(INSTALL_BIN) ./files/openthread-proto.sh $(1)/lib/netifd/proto/openthread.sh
+	$(INSTALL_DATA) $(PKG_INSTALL_DIR)/usr/share/otbr/nftables-backend \
+		$(1)/usr/share/otbr
 	$(INSTALL_BIN) ./files/otbr-rcp $(1)/usr/sbin
 	$(INSTALL_DATA) ./files/otbr-rcp.hotplug $(1)/etc/hotplug.d/usb/50-otbr-rcp
 	$(INSTALL_BIN) ./files/openthread.uci-defaults $(1)/etc/uci-defaults/99-openthread-firewall

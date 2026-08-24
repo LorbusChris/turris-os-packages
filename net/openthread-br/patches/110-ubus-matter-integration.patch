@@ -1,4 +1,4 @@
-From 3bc1174989946c548e900da512518db161202ccb Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Karsten Sperling <ksperling@apple.com>
 Date: Sat, 4 Oct 2025 01:44:01 +1300
 Subject: [PATCH] Ubus: Add methods and notifications for Matter integration
@@ -187,6 +187,3 @@ index 676a10b9..02c49116 100644
      // === Internal helpers ===
  
      static UbusServer &PrepareInvocation(ubus_object *aObj, ubus_request_data *aRequest, const char *aMethod);
--- 
-2.55.0
-

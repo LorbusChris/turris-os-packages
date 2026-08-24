@@ -1,4 +1,4 @@
-From a0f303a1b5988cabb4580d6c2fbfe644db4f9fd4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Christian Glombek <c.glombek@cosa.systems>
 Date: Sat, 1 Aug 2026 04:01:25 +0200
 Subject: [PATCH] [ubus] report the router table and the neighbour frame
@@ -12,8 +12,6 @@ allocated router id, carrying exactly the fields otRouterInfo holds.
 The neighbour rows gain LinkFrameCounter and MleFrameCounter. Both are
 mandatory fields of the cluster's neighbour table and otNeighborInfo has had
 them all along.
-
-(cherry picked from commit e36c92d174ed0321552b2499592df9f5c736e120)
 ---
  src/openwrt/ubus/otubus.cpp | 46 +++++++++++++++++++++++++++++++++++++
  src/openwrt/ubus/otubus.hpp |  1 +
